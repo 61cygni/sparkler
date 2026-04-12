@@ -1,6 +1,8 @@
 import { SignInButton, useAuth } from "@clerk/clerk-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 import { Link } from "react-router-dom";
+import { api } from "../../convex/_generated/api";
 
 const clerkPub = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const convexUrl = import.meta.env.VITE_CONVEX_URL ?? "";
@@ -18,12 +20,23 @@ function parsePort(search) {
 
 function CliLoginInner() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
+  const storeCurrentUser = useMutation(api.users.storeCurrentUser);
+  const accountStatus = useQuery(api.users.getMyAccountStatus);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const port = useMemo(
     () => parsePort(typeof window !== "undefined" ? window.location.search : ""),
     [],
   );
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) {
+      return;
+    }
+    void storeCurrentUser().catch((error) => {
+      setErr(error instanceof Error ? error.message : String(error));
+    });
+  }, [isLoaded, isSignedIn, storeCurrentUser]);
 
   const sendToCli = useCallback(async () => {
     if (!port) {
@@ -73,6 +86,21 @@ function CliLoginInner() {
         </>
       ) : (
         <>
+          {accountStatus?.approvalStatus === "pending" ? (
+            <p className="muted">
+              Your account is pending approval. You can still send this token to the CLI, but
+              hosting and scene-management commands will stay blocked until an admin approves you.
+            </p>
+          ) : null}
+          {accountStatus?.approvalStatus === "rejected" ? (
+            <p className="muted">
+              Your account was rejected. Sending the token is still possible for diagnostics, but
+              Sparkler will block protected commands until an admin changes your status.
+            </p>
+          ) : null}
+          {accountStatus?.approvalStatus === "approved" ? (
+            <p className="muted">Your account is approved and ready for CLI use.</p>
+          ) : null}
           <p>
             <button type="button" disabled={busy || !port} onClick={() => void sendToCli()}>
               {busy ? "Redirecting…" : "Send token to CLI"}

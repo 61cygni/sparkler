@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useAction, useMutation } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
 export default function Upload() {
+  const accountStatus = useQuery(api.users.getMyAccountStatus);
   const createScene = useMutation(api.scenes.createScene);
   const finalizeScene = useMutation(api.scenes.finalizeScene);
   const markFailed = useMutation(api.scenes.markSceneFailed);
@@ -15,11 +16,20 @@ export default function Upload() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [doneId, setDoneId] = useState(null);
+  const canUpload = accountStatus === undefined || accountStatus?.isApproved === true;
 
   async function onSubmit(e) {
     e.preventDefault();
     setError("");
     setDoneId(null);
+    if (accountStatus?.approvalStatus === "pending") {
+      setError("Your account is pending approval.");
+      return;
+    }
+    if (accountStatus?.approvalStatus === "rejected") {
+      setError("Your account was rejected.");
+      return;
+    }
     if (!file) {
       setError("Choose a file.");
       return;
@@ -65,6 +75,16 @@ export default function Upload() {
   return (
     <div className="page">
       <h1 style={{ marginTop: 0 }}>Upload</h1>
+      {accountStatus?.approvalStatus === "pending" ? (
+        <p className="muted">
+          Your account is pending approval. An admin must approve you before uploads are enabled.
+        </p>
+      ) : null}
+      {accountStatus?.approvalStatus === "rejected" ? (
+        <p className="muted">
+          Your account was rejected. Contact an admin if you need access restored.
+        </p>
+      ) : null}
       <form onSubmit={onSubmit} style={{ maxWidth: 420 }}>
         <label style={{ display: "block", marginBottom: "0.75rem" }}>
           <span className="muted">Title</span>
@@ -73,6 +93,7 @@ export default function Upload() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="My scan"
+            disabled={!canUpload}
             style={{ display: "block", width: "100%", marginTop: 4, padding: "0.5rem" }}
           />
         </label>
@@ -81,6 +102,7 @@ export default function Upload() {
           <select
             value={visibility}
             onChange={(e) => setVisibility(e.target.value)}
+            disabled={!canUpload}
             style={{ display: "block", width: "100%", marginTop: 4, padding: "0.5rem" }}
           >
             <option value="public">Public (listed on home)</option>
@@ -93,10 +115,11 @@ export default function Upload() {
           <input
             type="file"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            disabled={!canUpload}
             style={{ display: "block", marginTop: 4 }}
           />
         </label>
-        <button type="submit" style={{ padding: "0.5rem 1rem" }}>
+        <button type="submit" disabled={!canUpload} style={{ padding: "0.5rem 1rem" }}>
           Upload
         </button>
       </form>

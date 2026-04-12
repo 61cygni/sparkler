@@ -90,6 +90,7 @@ function SceneCard({ scene, linkLabel, meta, signedUrls }) {
 }
 
 export default function Home() {
+  const accountStatus = useQuery(api.users.getMyAccountStatus);
   const publicScenes = useQuery(api.scenes.listPublicScenes, { limit: 48 });
   const myScenes = useQuery(api.scenes.listMyScenes, { limit: 50 });
   const publicSignedUrls = useSignedThumbnailUrls(publicScenes ?? EMPTY_SCENES);
@@ -108,6 +109,17 @@ export default function Home() {
       <p>
         <Link to="/upload">Upload a scene →</Link>
       </p>
+      {accountStatus?.approvalStatus === "pending" ? (
+        <p className="muted">
+          Your account is pending approval. You can browse public scenes now, but uploads and CLI
+          scene management stay blocked until an admin approves you.
+        </p>
+      ) : null}
+      {accountStatus?.approvalStatus === "rejected" ? (
+        <p className="muted">
+          Your account was rejected. Contact a Sparkler admin if you still need access.
+        </p>
+      ) : null}
 
       <h2>Public scenes</h2>
       {publicScenes === undefined ? (

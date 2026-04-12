@@ -2,7 +2,7 @@
 
 This document describes a **CLI-first** workflow for turning a local splat file (`.spz`, `.ply`, …) into a **single shareable URL** on the open web: a hosted viewer page with good defaults (LoD `.rad`, paged streaming, movement controls, embed help, saved default view).
 
-**Status:** The CLI now implements `login`, `convert`, `host`, `dashboard`, `list`, `del`, `set-visibility`, `set-view`, `adopt-demo-scenes`, and `embed-snippet`. The default `host` conversion path is implemented, as are three auth modes: Clerk login, demo/no-auth dev mode, and HTTP bearer fallback. The full viewer now uses Spark paged loading for `.rad`, has `WASD` movement, `Shift` run, `Q/E` roll, `R/F` up/down, a mobile joystick, and a capture-to-thumbnail flow that feeds the dashboard cards. The main remaining target UX gaps are a more polished combined info/embed panel and any future VR-specific work.
+**Status:** The CLI now implements `login`, `convert`, `host`, `dashboard`, `list`, `del`, `set-visibility`, `set-view`, `adopt-demo-scenes`, and `embed-snippet`. The default `host` conversion path is implemented, as are three auth modes: Clerk login, demo/no-auth dev mode, and shared-secret admin automation. The public installed CLI now uses authenticated `/api/cli/*` routes on `*.convex.site` instead of importing this repo’s generated Convex API directly. The full viewer now uses Spark paged loading for `.rad`, has `WASD` movement, `Shift` run, `Q/E` roll, `R/F` up/down, a mobile joystick, and a capture-to-thumbnail flow that feeds the dashboard cards. The main remaining target UX gaps are a more polished combined info/embed panel and any future VR-specific work.
 
 ---
 
@@ -16,6 +16,15 @@ sparkler host myscan.spz
 ```
 
 That’s the **default story**. Everything else (explicit convert-only, raw upload, scripting flags) is **advanced**.
+
+For first-time users, the hosted app can also serve a bootstrap installer:
+
+```bash
+curl -fsSL https://<deployment>.convex.site/setup.sh -o setup.sh
+bash setup.sh
+```
+
+That installer checks Node/npm, downloads the Sparkler source tarball from GitHub, runs `npm install` for `packages/cli`, optionally writes the Sparkler deployment config, and then points the user at `sparkler login`.
 
 ---
 
@@ -33,16 +42,19 @@ That’s the **default story**. Everything else (explicit convert-only, raw uplo
    - **`convexUrl`** — `https://<deployment>.convex.cloud`
    - **`deploymentUrl`** — origin where the viewer app is served
    - **`accessToken`** — Clerk-issued Convex JWT
+4. Immediately verifies the account over `/api/cli/me`, so the user can see whether Sparkler access is already **approved** or still **pending** admin review.
 
 **Fallbacks:**
 
 - **Demo mode:** `--demo` or `SPARKLER_DEMO=1` with Convex `SPARKLER_DEMO_OWNER_SUBJECT`
-- **HTTP bearer mode:** `SPARKLER_CLI_TOKEN`, `SPARKLER_CONVEX_SITE_URL`, `SPARKLER_DEPLOYMENT_URL`
+- **Admin automation mode:** `SPARKLER_CLI_TOKEN`, `SPARKLER_CONVEX_SITE_URL`, `SPARKLER_DEPLOYMENT_URL`
 - **Config/env loading:** the CLI auto-loads `.env` and `.env.local` from the current working directory, and honors `SPARKLER_ENV_FILE`
 
 **Design rule:** After a successful `login`, **`sparkler host`** should work with **zero extra env vars**.
 
 **Practical note:** The CLI now prefers saved Clerk credentials over an ambient `SPARKLER_DEMO=1` environment flag unless `--demo` is passed explicitly. This makes it safer to move from no-auth local testing to real auth without constantly editing `.env`.
+
+**Approval rule:** successful Clerk sign-in is necessary but not sufficient. Protected commands are blocked until the user’s Sparkler account has `approvalStatus = approved`.
 
 ---
 
@@ -57,7 +69,7 @@ When the file is **not** already `.rad`:
 1. **Convert in-process for upload** (user does not run `convert` separately):
    - Invoke Spark’s **`build-lod`** with **`--quality`** (Spark’s higher-quality LoD path) so the hosted asset is a **`.rad`** suitable for large scenes and consistent viewer performance.
    - Use a **temp directory** (e.g. system temp + unique subfolder); clean it up after upload.
-2. **Upload** the resulting `.rad` to Tigris via Convex (Clerk/demo) or the HTTP bearer fallback (presigned PUT, finalize).
+2. **Upload** the resulting `.rad` to Tigris via authenticated `/api/cli/*` routes (or demo/admin-automation fallback) and a presigned PUT URL.
 3. **Register** the scene in Convex (title from basename unless `--title`, visibility default **unlisted** unless changed).
 4. **Print one line** (human default): the **viewer page URL**  
    `https://<deployment>/s/<sceneId>`  
@@ -199,7 +211,16 @@ sparkler set-view <sceneId> --view-json '{"position":[...],"target":[...],"quate
 
 ## Managing hosted splats
 
-These commands operate on **your** hosted scenes using the same identity mode as `host`: Clerk login, demo mode, or HTTP bearer fallback. They keep the **library manageable** without opening the web UI.
+These commands operate on **your** hosted scenes using the same identity mode as `host`: Clerk login, demo mode, or shared-secret admin automation. They keep the **library manageable** without opening the web UI.
+
+### Access approval
+
+Sparkler now separates **authentication** from **authorization**:
+
+1. Clerk proves who the user is.
+2. Sparkler provisions a `users` record keyed by Clerk subject/token identifier.
+3. Admins approve or reject access in `/admin/access` (unless env-based allowlists auto-approve the user).
+4. Protected CLI commands fail with a clear `pending approval` or `rejected` message until approval is granted.
 
 ### `sparkler list`
 
@@ -361,7 +382,9 @@ SPARKLER_DEPLOYMENT_URL=http://localhost:5173
 ## Backend (Convex HTTP + Tigris)
 
 - **Tigris** for blobs; **Convex** for metadata and presigned uploads.
-- **HTTP routes** under `https://<deployment>.convex.site/cli/...`:
+- **Public CLI routes** under `https://<deployment>.convex.site/api/cli/...`:
+  - Implemented: **me**, **upload session**, **finalize**, **mark-failed**, **list**, **delete**, **set-view**, **set-visibility**, **adopt-demo-scenes**.
+- **Shared-secret admin automation routes** under `https://<deployment>.convex.site/cli/...`:
   - Implemented: **upload session**, **finalize**, **mark-failed**, **list**, **delete**, **set-view**, **set-visibility**.
 - **Design principle:** CLI never holds Tigris keys for reads/writes of arbitrary buckets—presigned PUT for upload; **server-side delete** uses the same Convex-provisioned Tigris credentials as today’s presign path.
 
@@ -389,6 +412,7 @@ SPARKLER_DEPLOYMENT_URL=http://localhost:5173
 |-------------|----------|
 | **“I want a link to my scan.”** | `sparkler login` → `sparkler host file.spz` |
 | **“Open the web UI.”** | `sparkler dashboard` |
+| **“Approve a new user.”** | Sign in as an admin → `/admin/access` |
 | **“What have I uploaded?”** | `sparkler list` |
 | **“Remove this one.”** | `sparkler del <sceneId>` |
 | **“Make this one public.”** | `sparkler set-visibility <sceneId> public` |

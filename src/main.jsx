@@ -3,8 +3,10 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ClerkProvider, useAuth } from "@clerk/clerk-react";
 import { getConvexUrl } from "@convex-dev/static-hosting";
-import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { ConvexProvider, ConvexReactClient, useMutation } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { useEffect, useRef } from "react";
+import { api } from "../convex/_generated/api";
 import App from "./App.jsx";
 import "./index.css";
 
@@ -18,11 +20,37 @@ if (!convexUrl) {
 const convex = new ConvexReactClient(convexUrl);
 const clerkPub = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
+function ClerkAccountSync() {
+  const { isLoaded, isSignedIn } = useAuth();
+  const storeCurrentUser = useMutation(api.users.storeCurrentUser);
+  const syncedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+    if (!isSignedIn) {
+      syncedRef.current = false;
+      return;
+    }
+    if (syncedRef.current) {
+      return;
+    }
+    syncedRef.current = true;
+    void storeCurrentUser().catch(() => {
+      syncedRef.current = false;
+    });
+  }, [isLoaded, isSignedIn, storeCurrentUser]);
+
+  return null;
+}
+
 function Root() {
   if (clerkPub) {
     return (
       <ClerkProvider publishableKey={clerkPub}>
         <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+          <ClerkAccountSync />
           <BrowserRouter>
             <App />
           </BrowserRouter>

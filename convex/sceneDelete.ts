@@ -7,7 +7,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import type { ActionCtx } from "./_generated/server";
 import { action, internalAction } from "./_generated/server";
-import { requireViewerSubjectAction } from "./auth";
+import { requireApprovedViewerSubjectAction } from "./auth";
 
 function cliOwnerSubject(): string {
   const owner = process.env.SPARKLER_CLI_OWNER_SUBJECT?.trim();
@@ -74,7 +74,7 @@ async function deleteSceneForOwner(
 export const deleteMyScene = action({
   args: { sceneId: v.id("scenes") },
   handler: async (ctx: ActionCtx, args: { sceneId: Id<"scenes"> }) => {
-    const subject = await requireViewerSubjectAction(ctx);
+    const subject = await requireApprovedViewerSubjectAction(ctx);
     return await deleteSceneForOwner(ctx, args.sceneId, subject);
   },
 } as never) as RegisteredAction<
@@ -87,5 +87,18 @@ export const deleteForCli = internalAction({
   args: { sceneId: v.id("scenes") },
   handler: async (ctx: ActionCtx, args: { sceneId: Id<"scenes"> }) => {
     return await deleteSceneForOwner(ctx, args.sceneId, cliOwnerSubject());
+  },
+} as never);
+
+export const deleteForOwner = internalAction({
+  args: {
+    sceneId: v.id("scenes"),
+    ownerSubject: v.string(),
+  },
+  handler: async (
+    ctx: ActionCtx,
+    args: { sceneId: Id<"scenes">; ownerSubject: string },
+  ) => {
+    return await deleteSceneForOwner(ctx, args.sceneId, args.ownerSubject);
   },
 } as never);

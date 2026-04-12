@@ -9,8 +9,8 @@ import {
 } from "./_generated/server";
 import {
   getViewerSubject,
+  requireApprovedViewerSubject,
   requireAuthenticatedSubject,
-  requireViewerSubject,
 } from "./auth";
 
 const defaultViewValidator = v.object({
@@ -74,6 +74,37 @@ async function updateSceneVisibilityForOwner(
   }
   await ctx.db.patch(sceneId, { visibility });
   return null;
+}
+
+async function adoptDemoScenesBatch(
+  ctx: MutationCtx,
+  adoptedSubject: string,
+  batchSizeInput: number | undefined,
+) {
+  const demoSubject = demoOwnerSubject();
+  if (adoptedSubject === demoSubject) {
+    throw new Error("Authenticated subject already matches SPARKLER_DEMO_OWNER_SUBJECT");
+  }
+
+  const batchSize = Math.max(1, Math.min(batchSizeInput ?? 200, 200));
+  const rows = await ctx.db
+    .query("scenes")
+    .withIndex("by_owner_created", (q) => q.eq("ownerSubject", demoSubject))
+    .order("desc")
+    .take(batchSize);
+
+  for (const row of rows) {
+    await ctx.db.patch(row._id, {
+      ownerSubject: adoptedSubject,
+    });
+  }
+
+  return {
+    updated: rows.length,
+    hasMore: rows.length === batchSize,
+    adoptedSubject,
+    demoSubject,
+  };
 }
 
 async function insertPendingScene(
@@ -299,6 +330,21 @@ export const listForCli = internalQuery({
   },
 });
 
+export const listForOwner = internalQuery({
+  args: {
+    ownerSubject: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(args.limit ?? 100, 200);
+    return await ctx.db
+      .query("scenes")
+      .withIndex("by_owner_created", (q) => q.eq("ownerSubject", args.ownerSubject))
+      .order("desc")
+      .take(limit);
+  },
+});
+
 export const createScene = mutation({
   args: {
     filename: v.string(),
@@ -311,8 +357,12 @@ export const createScene = mutation({
     contentType: v.optional(v.string()),
     byteSize: v.optional(v.number()),
   },
+  returns: v.object({
+    sceneId: v.id("scenes"),
+    storageKey: v.string(),
+  }),
   handler: async (ctx, args) => {
-    const ownerSubject = await requireViewerSubject(ctx);
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
     return await insertPendingScene(ctx, ownerSubject, args);
   },
 });
@@ -323,8 +373,9 @@ export const finalizeScene = mutation({
     byteSize: v.optional(v.number()),
     contentType: v.optional(v.string()),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
-    const ownerSubject = await requireViewerSubject(ctx);
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
     return await finalizePendingScene(ctx, ownerSubject, args);
   },
 });
@@ -333,7 +384,7 @@ export const markSceneFailed = mutation({
   args: { sceneId: v.id("scenes") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const ownerSubject = await requireViewerSubject(ctx);
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
     const scene = await ctx.db.get(args.sceneId);
     if (!scene || scene.ownerSubject !== ownerSubject) {
       throw new Error("Forbidden");
@@ -350,7 +401,7 @@ export const updateSceneDefaultView = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const ownerSubject = await requireViewerSubject(ctx);
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
     const scene = await ctx.db.get(args.sceneId);
     if (!scene || scene.ownerSubject !== ownerSubject) {
       throw new Error("Forbidden");
@@ -369,7 +420,7 @@ export const updateSceneVisibility = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const ownerSubject = await requireViewerSubject(ctx);
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
     return await updateSceneVisibilityForOwner(
       ctx,
       args.sceneId,
@@ -389,30 +440,7 @@ export const adoptDemoScenes = mutation({
   }),
   handler: async (ctx, args) => {
     const adoptedSubject = await requireAuthenticatedSubject(ctx);
-    const demoSubject = demoOwnerSubject();
-    if (adoptedSubject === demoSubject) {
-      throw new Error("Authenticated subject already matches SPARKLER_DEMO_OWNER_SUBJECT");
-    }
-
-    const batchSize = Math.max(1, Math.min(args.batchSize ?? 200, 200));
-    const rows = await ctx.db
-      .query("scenes")
-      .withIndex("by_owner_created", (q) => q.eq("ownerSubject", demoSubject))
-      .order("desc")
-      .take(batchSize);
-
-    for (const row of rows) {
-      await ctx.db.patch(row._id, {
-        ownerSubject: adoptedSubject,
-      });
-    }
-
-    return {
-      updated: rows.length,
-      hasMore: rows.length === batchSize,
-      adoptedSubject,
-      demoSubject,
-    };
+    return await adoptDemoScenesBatch(ctx, adoptedSubject, args.batchSize);
   },
 });
 
@@ -426,7 +454,7 @@ export const saveSceneThumbnail = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const ownerSubject = await requireViewerSubject(ctx);
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
     const scene = await ctx.db.get(args.sceneId);
     if (!scene || scene.ownerSubject !== ownerSubject) {
       throw new Error("Forbidden");
@@ -479,6 +507,20 @@ export const createForCli = internalMutation({
   },
 });
 
+export const createForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    filename: v.string(),
+    title: v.optional(v.string()),
+    visibility: visibilityValidator,
+    contentType: v.optional(v.string()),
+    byteSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await insertPendingScene(ctx, args.ownerSubject, args);
+  },
+});
+
 export const finalizeForCli = internalMutation({
   args: {
     sceneId: v.id("scenes"),
@@ -490,12 +532,39 @@ export const finalizeForCli = internalMutation({
   },
 });
 
+export const finalizeForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    byteSize: v.optional(v.number()),
+    contentType: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    return await finalizePendingScene(ctx, args.ownerSubject, args);
+  },
+});
+
 export const markFailedForCli = internalMutation({
   args: { sceneId: v.id("scenes") },
   handler: async (ctx, args) => {
     const ownerSubject = cliOwnerSubject();
     const scene = await ctx.db.get(args.sceneId);
     if (!scene || scene.ownerSubject !== ownerSubject) {
+      throw new Error("Forbidden");
+    }
+    await ctx.db.patch(args.sceneId, { status: "failed" });
+    return null;
+  },
+});
+
+export const markFailedForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+  },
+  handler: async (ctx, args) => {
+    const scene = await ctx.db.get(args.sceneId);
+    if (!scene || scene.ownerSubject !== args.ownerSubject) {
       throw new Error("Forbidden");
     }
     await ctx.db.patch(args.sceneId, { status: "failed" });
@@ -537,6 +606,24 @@ export const updateDefaultViewForCli = internalMutation({
   },
 });
 
+export const updateDefaultViewForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    defaultView: defaultViewValidator,
+  },
+  handler: async (ctx, args) => {
+    const scene = await ctx.db.get(args.sceneId);
+    if (!scene || scene.ownerSubject !== args.ownerSubject) {
+      throw new Error("Forbidden");
+    }
+    await ctx.db.patch(args.sceneId, {
+      defaultView: args.defaultView,
+    });
+    return null;
+  },
+});
+
 export const updateVisibilityForCli = internalMutation({
   args: {
     sceneId: v.id("scenes"),
@@ -549,5 +636,31 @@ export const updateVisibilityForCli = internalMutation({
       cliOwnerSubject(),
       args.visibility,
     );
+  },
+});
+
+export const updateVisibilityForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    visibility: visibilityValidator,
+  },
+  handler: async (ctx, args) => {
+    return await updateSceneVisibilityForOwner(
+      ctx,
+      args.sceneId,
+      args.ownerSubject,
+      args.visibility,
+    );
+  },
+});
+
+export const adoptDemoScenesForSubject = internalMutation({
+  args: {
+    adoptedSubject: v.string(),
+    batchSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await adoptDemoScenesBatch(ctx, args.adoptedSubject, args.batchSize);
   },
 });

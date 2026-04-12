@@ -1,0 +1,17 @@
+{
+  "name": "sparkler",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "sparkler": "./bin/sparkler.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "dependencies": {
+    "commander": "^12.1.0",
+    "convex": "^1.17.4",
+    "dotenv": "^17.4.1"
+  }
+}

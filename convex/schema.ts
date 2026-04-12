@@ -2,6 +2,28 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  users: defineTable({
+    subject: v.string(),
+    tokenIdentifier: v.string(),
+    email: v.optional(v.string()),
+    name: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+    role: v.union(v.literal("user"), v.literal("admin")),
+    approvalStatus: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("rejected"),
+    ),
+    approvedAt: v.optional(v.number()),
+    approvedBySubject: v.optional(v.string()),
+    rejectedAt: v.optional(v.number()),
+    rejectedBySubject: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_subject", ["subject"])
+    .index("by_token_identifier", ["tokenIdentifier"])
+    .index("by_approval_created", ["approvalStatus", "createdAt"]),
   scenes: defineTable({
     ownerSubject: v.string(),
     title: v.string(),

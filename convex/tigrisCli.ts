@@ -78,3 +78,52 @@ export const presignUploadForCli = internalAction({
     return { url, headers: { "Content-Type": contentType } };
   },
 } as never);
+
+export const presignUploadForOwner = internalAction({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    contentType: v.optional(v.string()),
+    byteSize: v.optional(v.number()),
+  },
+  handler: async (
+    ctx: ActionCtx,
+    args: {
+      ownerSubject: string;
+      sceneId: Id<"scenes">;
+      contentType?: string;
+      byteSize?: number;
+    },
+  ) => {
+    const scene = await ctx.runQuery(internal.sceneInternals.get, {
+      sceneId: args.sceneId,
+    });
+    if (!scene) {
+      throw new Error("Scene not found");
+    }
+    if (scene.ownerSubject !== args.ownerSubject) {
+      throw new Error("Forbidden");
+    }
+    if (scene.status !== "pending_upload") {
+      throw new Error("Invalid scene status for upload");
+    }
+
+    const maxBytes = Number(process.env.SPARKLER_MAX_UPLOAD_BYTES ?? 536870912);
+    if (args.byteSize !== undefined && args.byteSize > maxBytes) {
+      throw new Error(`File too large (max ${maxBytes} bytes).`);
+    }
+
+    const { bucket } = requireTigrisEnv();
+    const client = s3Client();
+    const contentType = args.contentType ?? "application/octet-stream";
+
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: scene.storageKey,
+      ContentType: contentType,
+    });
+
+    const url = await getSignedUrl(client, command, { expiresIn: 900 });
+    return { url, headers: { "Content-Type": contentType } };
+  },
+} as never);

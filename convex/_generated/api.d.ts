@@ -16,6 +16,7 @@ import type * as scenes from "../scenes.js";
 import type * as staticHosting from "../staticHosting.js";
 import type * as tigris from "../tigris.js";
 import type * as tigrisCli from "../tigrisCli.js";
+import type * as users from "../users.js";
 
 import type {
   ApiFromModules,
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   staticHosting: typeof staticHosting;
   tigris: typeof tigris;
   tigrisCli: typeof tigrisCli;
+  users: typeof users;
 }>;
 
 /**

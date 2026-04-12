@@ -1,13 +1,13 @@
 # Sparkler
 
-Vite + React (JavaScript) app for hosting Gaussian splats: **Convex** (metadata + presigned URLs), **Tigris** (S3-compatible storage), **Spark** 2.0 (`../spark`) for rendering.
+Vite + React (JavaScript) app for hosting Gaussian splats: **Convex** (metadata + presigned URLs), **Tigris** (S3-compatible storage), and **Spark** 2.0 for rendering and optional local `.rad` conversion.
 
 ## Prerequisites
 
 - Node 18+
 - A [Convex](https://www.convex.dev/) project
 - A [Tigris](https://www.tigrisdata.com/) bucket (or other S3-compatible API)
-- Spark built locally: `cd ../spark && npm install && npm run build`
+- Optional for `sparkler convert` / default non-`.rad` CLI uploads: a local Spark checkout with `npm run build-lod`
 
 ## Setup
 
@@ -37,9 +37,13 @@ Vite + React (JavaScript) app for hosting Gaussian splats: **Convex** (metadata 
    | `TIGRIS_REGION` | Optional, default `auto` |
    | `TIGRIS_PUBLIC_BASE_URL` | Optional. If set, public/unlisted scene files can use `GET` at `{base}/{storageKey}` (bucket must allow public read + CORS). The app still uses signed URLs for thumbnails. |
    | `SPARKLER_DEMO_OWNER_SUBJECT` | **Dev only.** Fake “user id” for uploads when Clerk is not configured. Also powers CLI `--demo` / `SPARKLER_DEMO=1`. Remove in production. |
-   | `SPARKLER_CLI_SECRET` | **CLI uploads.** Shared secret; CLI sends `Authorization: Bearer <same value>` as `SPARKLER_CLI_TOKEN`. |
-   | `SPARKLER_CLI_OWNER_SUBJECT` | **CLI uploads.** Stable owner id stored on scenes created via HTTP CLI (e.g. `cli:prod`). Must be set if `SPARKLER_CLI_SECRET` is set. |
+   | `SPARKLER_CLI_SECRET` | **Admin automation only.** Shared secret for the owner-only `/cli/*` HTTP routes. Do not distribute this to normal users. |
+   | `SPARKLER_CLI_OWNER_SUBJECT` | **Admin automation only.** Stable owner id stored on scenes created via shared-secret `/cli/*` routes (e.g. `cli:prod`). Must be set if `SPARKLER_CLI_SECRET` is set. |
    | `CLERK_JWT_ISSUER` | If using Clerk: issuer URL (e.g. `https://your-app.clerk.accounts.dev`). When set, `convex/auth.config.ts` enables Clerk auth; if unset, Convex stays in demo/no-auth mode. |
+   | `SPARKLER_ADMIN_SUBJECTS` | Optional comma-separated Clerk subjects that should auto-provision as approved admins. |
+   | `SPARKLER_ADMIN_EMAILS` | Optional comma-separated email allowlist for approved admins. |
+   | `SPARKLER_AUTO_APPROVE_EMAILS` | Optional comma-separated email allowlist that skips manual approval. |
+   | `SPARKLER_AUTO_APPROVE_DOMAINS` | Optional comma-separated email domains that skip manual approval (for example `mycompany.com`). |
 
 4. **Frontend `.env.local`**
 
@@ -60,6 +64,16 @@ If you want the CLI login flow to work end to end, make sure all three of these 
 
 After those are set, `sparkler login` opens `/cli-login`, Clerk signs you in, the page requests a Convex JWT from the `convex` template, and the CLI stores it in `~/.config/sparkler/credentials.json`.
 
+### Access approval
+
+Clerk login and Sparkler access are now separate steps:
+
+1. A user signs in with Clerk.
+2. Sparkler provisions a `users` record with `pending`, `approved`, or `rejected` status.
+3. Protected actions like `host`, `list`, `del`, `set-view`, and `set-visibility` require `approved`.
+
+Use `/admin/access` in the web app to review and approve pending users. Users matching `SPARKLER_ADMIN_*` or `SPARKLER_AUTO_APPROVE_*` can be approved automatically on first sign-in.
+
 5. **Tigris CORS**
 
    Allow your app origin (e.g. `http://localhost:5173`) for `GET`, `HEAD`, and `PUT` as needed.
@@ -73,27 +87,66 @@ After those are set, `sparkler login` opens `/cli-login`, Clerk signs you in, th
 
 ## CLI (`sparkler`)
 
-Binary: `npx sparkler` from this repo (or `npm link` / global install with `package.json` `bin`).
+Binary: the publishable package now lives in `packages/cli` and installs as `sparkler`. Inside this repo, the legacy wrapper at `node cli/bin/sparkler.mjs` still forwards to the packaged CLI.
+
+### Installer script
+
+If you host the app on Convex, the same site can also serve a shell installer at `/setup.sh`.
+That installer now downloads the Sparkler source tarball from GitHub, runs `npm install` inside `packages/cli`, installs the CLI into `~/.local/share/sparkler-cli`, and symlinks `~/.local/bin/sparkler`. End users need **Node 18+** and **npm**, but they do **not** need to install from the npm registry.
+
+Safer flow:
+
+```bash
+curl -fsSL https://<deployment>.convex.site/setup.sh -o setup.sh
+bash setup.sh
+```
+
+Direct pipe-to-shell:
+
+```bash
+curl -fsSL https://<deployment>.convex.site/setup.sh | bash
+```
+
+The installer:
+
+1. Detects macOS/Linux and checks that Node 18+, `npm`, `curl`, and `tar` are installed.
+2. Downloads the Sparkler source tarball from GitHub and runs `npm install` inside `packages/cli`.
+3. Optionally writes `~/.config/sparkler/config.json` from the deployment URL you enter, so `sparkler login` can work immediately.
+4. Verifies `sparkler --help` and prints the next steps, including the approval-gated login flow.
+
+For local development from this repo, you can also run:
+
+```bash
+bash ./scripts/setup.sh
+```
+
+### GitHub source installer settings
+
+The installer defaults to the GitHub repo `61cygni/sparkler` and downloads the `main` branch source tarball. You can override that with:
+
+- `SPARKLER_GITHUB_REPO` to point at another repo
+- `SPARKLER_GITHUB_REF` to pin a tag, branch, or commit-ish
 
 | Command | Purpose |
 |---------|---------|
 | `sparkler login` | Opens `/cli-login` (Clerk). After sign-in, loopback saves your Convex JWT to `~/.config/sparkler/credentials.json`. |
 | `sparkler convert <input>... [-o out.rad] [-- <build-lod-args>]` | Runs Spark’s `npm run build-lod` (needs Rust toolchain + `../spark` or `SPARKLER_SPARK_ROOT`). Writes `<name>-lod.rad` next to each input unless `-o` is used (single input only). |
-| `sparkler host <file>` | **Clerk (default):** Convex mutations + presigned PUT + finalize. **Demo:** unauthenticated Convex calls with `--demo` / `SPARKLER_DEMO=1` and Convex `SPARKLER_DEMO_OWNER_SUBJECT`. **HTTP:** `/cli/*` + `SPARKLER_CLI_TOKEN`. Non-`.rad` files run through `build-lod` in a temp dir unless `--no-convert`. |
+| `sparkler host <file>` | **Clerk (default):** authenticated `/api/cli/*` routes on `*.convex.site` + presigned PUT + finalize. **Demo:** unauthenticated Convex calls with `--demo` / `SPARKLER_DEMO=1` and Convex `SPARKLER_DEMO_OWNER_SUBJECT`. **Admin automation:** shared-secret `/cli/*` + `SPARKLER_CLI_TOKEN`. Non-`.rad` files run through `build-lod` in a temp dir unless `--no-convert`. |
 | `sparkler dashboard` | Opens the Sparkler dashboard using the saved deployment URL from `sparkler login` or `SPARKLER_DEPLOYMENT_URL`. |
-| `sparkler list` | Lists your scenes. Works with `sparkler login`, demo mode, or the HTTP CLI env fallback. |
-| `sparkler del <sceneId>` | Deletes Tigris object and DB row. Works with `sparkler login`, demo mode, or the HTTP CLI env fallback. |
-| `sparkler set-visibility <sceneId> <visibility>` | Changes an existing scene to `public`, `unlisted`, or `private`. Works with `sparkler login`, demo mode, or the HTTP CLI env fallback. |
-| `sparkler set-view <sceneId>` | Saves the scene’s default camera view from copied HUD JSON (`--view-file` or `--view-json`). Works with `sparkler login`, demo mode, or the HTTP CLI env fallback. |
+| `sparkler list` | Lists your scenes. Works with `sparkler login`, demo mode, or the admin shared-secret env fallback. |
+| `sparkler del <sceneId>` | Deletes Tigris object and DB row. Works with `sparkler login`, demo mode, or the admin shared-secret env fallback. |
+| `sparkler set-visibility <sceneId> <visibility>` | Changes an existing scene to `public`, `unlisted`, or `private`. Works with `sparkler login`, demo mode, or the admin shared-secret env fallback. |
+| `sparkler set-view <sceneId>` | Saves the scene’s default camera view from copied HUD JSON (`--view-file` or `--view-json`). Works with `sparkler login`, demo mode, or the admin shared-secret env fallback. |
 | `sparkler adopt-demo-scenes` | One-time migration: moves scenes owned by `SPARKLER_DEMO_OWNER_SUBJECT` onto your signed-in Clerk account. Requires `sparkler login`; do not use `--demo`. |
 | `sparkler embed-snippet <sceneId>` | Prints iframe HTML (or `--format md`) using saved deployment URL or `SPARKLER_DEPLOYMENT_URL`. |
 
-**Clerk CLI (`login`, `host`, `list`, `del`):**
+**Public Clerk CLI (`login`, `host`, `list`, `del`):**
 
 | Variable | Purpose |
 |----------|---------|
 | `SPARKLER_CONVEX_URL` | `https://<deployment>.convex.cloud` |
 | `SPARKLER_DEPLOYMENT_URL` | Origin of the Sparkler app (opens `/cli-login`, viewer/embed links). |
+| `SPARKLER_CONVEX_SITE_URL` | Optional override for the authenticated `*.convex.site` HTTP routes. Usually inferred from `SPARKLER_CONVEX_URL`. |
 
 **Demo CLI (no Clerk, local dev):**
 
@@ -103,7 +156,7 @@ Binary: `npx sparkler` from this repo (or `npm link` / global install with `pack
 | `SPARKLER_CONVEX_URL` | `https://<deployment>.convex.cloud` |
 | `SPARKLER_DEPLOYMENT_URL` | Origin of the Sparkler app (`http://localhost:5173` in dev) |
 
-**HTTP CLI (optional, for automation):**
+**Admin automation CLI (optional, shared secret):**
 
 | Variable | Purpose |
 |----------|---------|
@@ -116,7 +169,7 @@ Binary: `npx sparkler` from this repo (or `npm link` / global install with `pack
 |----------|---------|
 | `SPARKLER_SPARK_ROOT` | Path to Spark repo for `convert` / default `host` conversion (optional if `../spark` exists) |
 
-Optional config file: `~/.config/sparkler/config.json` with `convexSiteUrl`, `deploymentUrl`, `convexUrl` (used to infer `.convex.site` from `.convex.cloud`).
+Optional config file: `~/.config/sparkler/config.json` with `convexSiteUrl`, `deploymentUrl`, `convexUrl`.
 
 The CLI now auto-loads `.env` and `.env.local` from your current working directory. If you want a different file, set `SPARKLER_ENV_FILE=/path/to/file.env`.
 
@@ -164,7 +217,7 @@ This path is for local development only. Remove `SPARKLER_DEMO_OWNER_SUBJECT` be
 
 ## Host On Convex
 
-Static hosting is wired through `@convex-dev/static-hosting`, so the same Convex deployment can serve both your `/cli/*` HTTP routes and the built Vite app.
+Static hosting is wired through `@convex-dev/static-hosting`, so the same Convex deployment can serve the authenticated public CLI routes under `/api/cli/*`, the shared-secret admin automation routes under `/cli/*`, and the built Vite app.
 
 1. Keep the backend synced locally at least once:
 
@@ -212,6 +265,7 @@ See [`cli-design.md`](./cli-design.md) for the full design.
 ## Routes
 
 - `/` — Public gallery + your scenes  
+- `/admin/access` — Admin approval dashboard for pending users  
 - `/upload` — Presigned PUT upload flow  
 - `/s/:sceneId` — Full viewer (Spark `SparkRenderer` + `SplatMesh`, FPS controls, view HUD, thumbnail capture)  
 - `/embed/:sceneId` — Minimal viewer for iframes  

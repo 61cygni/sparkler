@@ -2,7 +2,7 @@ import { registerStaticRoutes } from "@convex-dev/static-hosting";
 import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
 import { components } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction, type ActionCtx } from "./_generated/server";
 
 const jsonHeaders = { "Content-Type": "application/json; charset=utf-8" };
 
@@ -38,9 +38,410 @@ function parseVisibility(value: unknown): "public" | "unlisted" | "private" {
   return "unlisted";
 }
 
+function jsonError(message: string, status: number) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: jsonHeaders,
+  });
+}
+
+async function requireCliUser(
+  ctx: ActionCtx,
+  allowPending = false,
+): Promise<
+  | {
+      ok: false;
+      response: Response;
+    }
+  | {
+      ok: true;
+      identity: NonNullable<Awaited<ReturnType<ActionCtx["auth"]["getUserIdentity"]>>>;
+      status: Awaited<ReturnType<ActionCtx["runMutation"]>>;
+    }
+> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity?.subject) {
+    return {
+      ok: false,
+      response: jsonError("Not authenticated. Run sparkler login first.", 401),
+    };
+  }
+
+  const status = await ctx.runMutation(internal.users.ensureCurrentUser, {
+    subject: identity.subject,
+    tokenIdentifier: identity.tokenIdentifier,
+    email: identity.email ?? null,
+    name: identity.name ?? null,
+    imageUrl: identity.pictureUrl ?? null,
+  });
+
+  if (!allowPending && !status.isApproved) {
+    const message =
+      status.approvalStatus === "pending"
+        ? "Your Sparkler account is pending approval."
+        : "Your Sparkler account was rejected.";
+    return {
+      ok: false,
+      response: jsonError(message, 403),
+    };
+  }
+
+  return {
+    ok: true,
+    identity,
+    status,
+  };
+}
+
 const http = httpRouter();
 const selfHosting = (components as { selfHosting: Parameters<typeof registerStaticRoutes>[1] })
   .selfHosting;
+
+http.route({
+  path: "/api/cli/me",
+  method: "GET",
+  handler: httpAction(async (ctx) => {
+    const auth = await requireCliUser(ctx, true);
+    if (!auth.ok) {
+      return auth.response;
+    }
+    return new Response(JSON.stringify(auth.status), {
+      status: 200,
+      headers: jsonHeaders,
+    });
+  }),
+});
+
+http.route({
+  path: "/api/cli/upload-session",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+
+    const filename = body.filename;
+    if (typeof filename !== "string" || !filename.trim()) {
+      return jsonError("filename is required", 400);
+    }
+
+    const title = typeof body.title === "string" ? body.title : undefined;
+    const visibility = parseVisibility(body.visibility);
+    const contentType =
+      typeof body.contentType === "string" ? body.contentType : undefined;
+    const byteSize =
+      typeof body.byteSize === "number" && Number.isFinite(body.byteSize)
+        ? body.byteSize
+        : undefined;
+
+    try {
+      const created = await ctx.runMutation(internal.scenes.createForOwner, {
+        ownerSubject: auth.identity.subject,
+        filename: filename.trim(),
+        title,
+        visibility,
+        contentType,
+        byteSize,
+      });
+      const presign = await ctx.runAction(internal.tigrisCli.presignUploadForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: created.sceneId as never,
+        contentType,
+        byteSize,
+      });
+      return new Response(
+        JSON.stringify({
+          sceneId: created.sceneId,
+          storageKey: created.storageKey,
+          uploadUrl: presign.url,
+          headers: presign.headers,
+        }),
+        { status: 200, headers: jsonHeaders },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/finalize",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+
+    const sceneId = body.sceneId;
+    if (typeof sceneId !== "string" || !sceneId.trim()) {
+      return jsonError("sceneId is required", 400);
+    }
+
+    const byteSize =
+      typeof body.byteSize === "number" && Number.isFinite(body.byteSize)
+        ? body.byteSize
+        : undefined;
+    const contentType =
+      typeof body.contentType === "string" ? body.contentType : undefined;
+
+    try {
+      await ctx.runMutation(internal.scenes.finalizeForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId.trim() as never,
+        byteSize,
+        contentType,
+      });
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/mark-failed",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+
+    const sceneId = body.sceneId;
+    if (typeof sceneId !== "string" || !sceneId.trim()) {
+      return jsonError("sceneId is required", 400);
+    }
+
+    try {
+      await ctx.runMutation(internal.scenes.markFailedForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId.trim() as never,
+      });
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/scenes",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    const url = new URL(request.url);
+    const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "100", 10);
+    const limit = Number.isFinite(rawLimit) ? rawLimit : 100;
+
+    try {
+      const rows = await ctx.runQuery(internal.scenes.listForOwner, {
+        ownerSubject: auth.identity.subject,
+        limit,
+      });
+      return new Response(JSON.stringify(rows), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/delete",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+
+    const sceneId = body.sceneId;
+    if (typeof sceneId !== "string" || !sceneId.trim()) {
+      return jsonError("sceneId is required", 400);
+    }
+
+    try {
+      await ctx.runAction(internal.sceneDelete.deleteForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId.trim() as never,
+      });
+      return new Response(JSON.stringify({ ok: true, sceneId: sceneId.trim() }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/set-view",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+
+    const sceneId = body.sceneId;
+    const defaultView = body.defaultView;
+    if (typeof sceneId !== "string" || !sceneId.trim()) {
+      return jsonError("sceneId is required", 400);
+    }
+    if (!defaultView || typeof defaultView !== "object") {
+      return jsonError("defaultView is required", 400);
+    }
+
+    try {
+      await ctx.runMutation(internal.scenes.updateDefaultViewForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId.trim() as never,
+        defaultView: defaultView as never,
+      });
+      return new Response(JSON.stringify({ ok: true, sceneId: sceneId.trim() }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/set-visibility",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+
+    const sceneId = body.sceneId;
+    if (typeof sceneId !== "string" || !sceneId.trim()) {
+      return jsonError("sceneId is required", 400);
+    }
+    const visibility = parseVisibility(body.visibility);
+
+    try {
+      await ctx.runMutation(internal.scenes.updateVisibilityForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId.trim() as never,
+        visibility,
+      });
+      return new Response(
+        JSON.stringify({ ok: true, sceneId: sceneId.trim(), visibility }),
+        {
+          status: 200,
+          headers: jsonHeaders,
+        },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/adopt-demo-scenes",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx, true);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+
+    const batchSize =
+      typeof body.batchSize === "number" && Number.isFinite(body.batchSize)
+        ? body.batchSize
+        : undefined;
+
+    try {
+      const result = await ctx.runMutation(internal.scenes.adoptDemoScenesForSubject, {
+        adoptedSubject: auth.identity.subject,
+        batchSize,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
 
 http.route({
   path: "/cli/upload-session",

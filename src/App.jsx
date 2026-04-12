@@ -1,10 +1,13 @@
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
+import { useQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
 import Home from "./pages/Home.jsx";
 import Upload from "./pages/Upload.jsx";
 import Viewer from "./pages/Viewer.jsx";
 import Embed from "./pages/Embed.jsx";
 import CliLogin from "./pages/CliLogin.jsx";
+import AdminAccess from "./pages/AdminAccess.jsx";
 
 const clerkEnabled = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
@@ -32,6 +35,7 @@ function AuthChrome() {
 
 export default function App() {
   const { pathname } = useLocation();
+  const accountStatus = useQuery(api.users.getMyAccountStatus);
   const chromeless =
     pathname.startsWith("/s/") ||
     pathname.startsWith("/embed/") ||
@@ -55,6 +59,7 @@ export default function App() {
               Sparkler
             </Link>
             <Link to="/upload">Upload</Link>
+            {accountStatus?.isAdmin ? <Link to="/admin/access">Admin</Link> : null}
           </nav>
           <AuthChrome />
         </header>
@@ -65,6 +70,7 @@ export default function App() {
         <Route path="/s/:sceneId" element={<Viewer />} />
         <Route path="/embed/:sceneId" element={<Embed />} />
         <Route path="/cli-login" element={<CliLogin />} />
+        <Route path="/admin/access" element={<AdminAccess />} />
       </Routes>
     </>
   );

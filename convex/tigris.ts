@@ -8,7 +8,11 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import type { ActionCtx } from "./_generated/server";
 import { action } from "./_generated/server";
-import { getViewerSubjectAction, requireViewerSubjectAction } from "./auth";
+import {
+  getViewerSubjectAction,
+  requireApprovedViewerSubjectAction,
+  requireViewerSubjectAction,
+} from "./auth";
 
 function requireTigrisEnv() {
   const accessKeyId = process.env.TIGRIS_ACCESS_KEY_ID;
@@ -47,7 +51,7 @@ export const presignUpload = action({
     ctx: ActionCtx,
     args: { sceneId: Id<"scenes">; contentType?: string; byteSize?: number },
   ) => {
-    const subject = await requireViewerSubjectAction(ctx);
+    const subject = await requireApprovedViewerSubjectAction(ctx);
     const scene = await ctx.runQuery(internal.sceneInternals.get, {
       sceneId: args.sceneId,
     });
@@ -127,7 +131,7 @@ export const presignThumbnailUpload = action({
     ctx: ActionCtx,
     args: { sceneId: Id<"scenes">; contentType?: string; byteSize?: number },
   ) => {
-    const subject = await requireViewerSubjectAction(ctx);
+    const subject = await requireApprovedViewerSubjectAction(ctx);
     const scene = await ctx.runQuery(internal.sceneInternals.get, {
       sceneId: args.sceneId,
     });
@@ -218,7 +222,7 @@ export const presignThumbnailUrls = action({
 export const verifyObject = action({
   args: { sceneId: v.id("scenes") },
   handler: async (ctx: ActionCtx, args: { sceneId: Id<"scenes"> }) => {
-    const subject = await requireViewerSubjectAction(ctx);
+    const subject = await requireApprovedViewerSubjectAction(ctx);
     const scene = await ctx.runQuery(internal.sceneInternals.get, {
       sceneId: args.sceneId,
     });
