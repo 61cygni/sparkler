@@ -62,7 +62,7 @@ If you want the CLI login flow to work end to end, make sure all three of these 
 2. In Convex environment variables, set `CLERK_JWT_ISSUER` to your Clerk issuer URL.
 3. In the frontend build environment, set `VITE_CLERK_PUBLISHABLE_KEY`.
 
-After those are set, `sparkler login` opens `/cli-login`, Clerk signs you in, the page requests a Convex JWT from the `convex` template, and the CLI stores it in `~/.config/sparkler/credentials.json`.
+After those are set, `sparkler login` opens `/cli-login`, Clerk signs you in, the page requests a Convex JWT from the `convex` template, and the CLI stores it in `$XDG_CONFIG_HOME/sparkler/credentials.json` (or `~/.config/sparkler/credentials.json` if `XDG_CONFIG_HOME` is unset).
 
 ### Access approval
 
@@ -92,7 +92,7 @@ Binary: the publishable package now lives in `packages/cli` and installs as `spa
 ### Installer script
 
 If you host the app on Convex, the same site can also serve a shell installer at `/setup.sh`.
-That installer now downloads the Sparkler source tarball from GitHub, runs `npm install` inside `packages/cli`, installs the CLI into `~/.local/share/sparkler-cli`, and symlinks `~/.local/bin/sparkler`. End users need **Node 18+** and **npm**, but they do **not** need to install from the npm registry.
+That installer now downloads the Sparkler source tarball from GitHub, runs `npm install` inside `packages/cli`, and by default installs everything into the current directory so the setup is self-contained. End users need **Node 18+** and **npm**, but they do **not** need to install from the npm registry.
 
 Safer flow:
 
@@ -111,8 +111,13 @@ The installer:
 
 1. Detects macOS/Linux and checks that Node 18+, `npm`, `curl`, and `tar` are installed.
 2. Downloads the Sparkler source tarball from GitHub and runs `npm install` inside `packages/cli`.
-3. Optionally writes `~/.config/sparkler/config.json` from the deployment URL you enter, so `sparkler login` can work immediately.
-4. Verifies `sparkler --help` and prints the next steps, including the approval-gated login flow.
+3. Writes all local state into the current directory by default:
+   - `./.sparkler` for the installed package
+   - `./bin/sparkler` for the launcher
+   - `./.config/sparkler` for config and saved login credentials
+   - `./.npm-cache` for npm's install cache
+4. Optionally writes `./.config/sparkler/config.json` from the deployment URL you enter, so `./bin/sparkler login` can work immediately.
+5. Verifies `./bin/sparkler --help` and prints the next steps, including the approval-gated login flow.
 
 For local development from this repo, you can also run:
 
@@ -126,10 +131,11 @@ The installer defaults to the GitHub repo `61cygni/sparkler` and downloads the `
 
 - `SPARKLER_GITHUB_REPO` to point at another repo
 - `SPARKLER_GITHUB_REF` to pin a tag, branch, or commit-ish
+- `SPARKLER_ROOT_DIR`, `SPARKLER_INSTALL_DIR`, `SPARKLER_BIN_DIR`, `XDG_CONFIG_HOME`, or `SPARKLER_NPM_CACHE_DIR` if you want a non-default layout
 
 | Command | Purpose |
 |---------|---------|
-| `sparkler login` | Opens `/cli-login` (Clerk). After sign-in, loopback saves your Convex JWT to `~/.config/sparkler/credentials.json`. |
+| `sparkler login` | Opens `/cli-login` (Clerk). After sign-in, loopback saves your Convex JWT to `$XDG_CONFIG_HOME/sparkler/credentials.json` (the installer sets this to `./.config/sparkler/credentials.json` by default). |
 | `sparkler convert <input>... [-o out.rad] [-- <build-lod-args>]` | Runs Spark’s `npm run build-lod` (needs Rust toolchain + `../spark` or `SPARKLER_SPARK_ROOT`). Writes `<name>-lod.rad` next to each input unless `-o` is used (single input only). |
 | `sparkler host <file>` | **Clerk (default):** authenticated `/api/cli/*` routes on `*.convex.site` + presigned PUT + finalize. **Demo:** unauthenticated Convex calls with `--demo` / `SPARKLER_DEMO=1` and Convex `SPARKLER_DEMO_OWNER_SUBJECT`. **Admin automation:** shared-secret `/cli/*` + `SPARKLER_CLI_TOKEN`. Non-`.rad` files run through `build-lod` in a temp dir unless `--no-convert`. |
 | `sparkler dashboard` | Opens the Sparkler dashboard using the saved deployment URL from `sparkler login` or `SPARKLER_DEPLOYMENT_URL`. |
@@ -169,7 +175,7 @@ The installer defaults to the GitHub repo `61cygni/sparkler` and downloads the `
 |----------|---------|
 | `SPARKLER_SPARK_ROOT` | Path to Spark repo for `convert` / default `host` conversion (optional if `../spark` exists) |
 
-Optional config file: `~/.config/sparkler/config.json` with `convexSiteUrl`, `deploymentUrl`, `convexUrl`.
+Optional config file: `$XDG_CONFIG_HOME/sparkler/config.json` with `convexSiteUrl`, `deploymentUrl`, `convexUrl`. Without `XDG_CONFIG_HOME`, that defaults to `~/.config/sparkler/config.json`.
 
 The CLI now auto-loads `.env` and `.env.local` from your current working directory. If you want a different file, set `SPARKLER_ENV_FILE=/path/to/file.env`.
 

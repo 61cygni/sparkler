@@ -5,11 +5,13 @@ set -euo pipefail
 
 SPARKLER_GITHUB_REPO="${SPARKLER_GITHUB_REPO:-61cygni/sparkler}"
 SPARKLER_GITHUB_REF="${SPARKLER_GITHUB_REF:-main}"
-CONFIG_HOME_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+INSTALL_ROOT_DIR="${SPARKLER_ROOT_DIR:-$PWD}"
+CONFIG_HOME_DIR="${XDG_CONFIG_HOME:-${INSTALL_ROOT_DIR}/.config}"
 SPARKLER_CONFIG_DIR="${CONFIG_HOME_DIR}/sparkler"
 SPARKLER_CONFIG_FILE="${SPARKLER_CONFIG_DIR}/config.json"
-SPARKLER_INSTALL_DIR="${SPARKLER_INSTALL_DIR:-$HOME/.local/share/sparkler-cli}"
-SPARKLER_BIN_DIR="${SPARKLER_BIN_DIR:-$HOME/.local/bin}"
+SPARKLER_INSTALL_DIR="${SPARKLER_INSTALL_DIR:-${INSTALL_ROOT_DIR}/.sparkler}"
+SPARKLER_BIN_DIR="${SPARKLER_BIN_DIR:-${INSTALL_ROOT_DIR}/bin}"
+SPARKLER_NPM_CACHE_DIR="${SPARKLER_NPM_CACHE_DIR:-${INSTALL_ROOT_DIR}/.npm-cache}"
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -129,19 +131,29 @@ install_cli() {
   fi
 
   say "Installing CLI dependencies locally ..."
-  npm install --prefix "$cli_dir"
+  npm install --prefix "$cli_dir" --cache "$SPARKLER_NPM_CACHE_DIR"
 
   mkdir -p "$(dirname "$SPARKLER_INSTALL_DIR")"
   rm -rf "$SPARKLER_INSTALL_DIR"
   mv "$cli_dir" "$SPARKLER_INSTALL_DIR"
   rm -rf "$tmp_root"
 
-  mkdir -p "$SPARKLER_BIN_DIR"
-  ln -sf "${SPARKLER_INSTALL_DIR}/bin/sparkler.mjs" "${SPARKLER_BIN_DIR}/sparkler"
+  write_launcher
 
   if ! "${SPARKLER_BIN_DIR}/sparkler" --help >/dev/null 2>&1; then
     fail "Sparkler installed, but 'sparkler --help' did not succeed."
   fi
+}
+
+write_launcher() {
+  mkdir -p "$SPARKLER_BIN_DIR"
+  cat >"${SPARKLER_BIN_DIR}/sparkler" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export XDG_CONFIG_HOME="\${XDG_CONFIG_HOME:-${CONFIG_HOME_DIR}}"
+exec node "${SPARKLER_INSTALL_DIR}/bin/sparkler.mjs" "\$@"
+EOF
+  chmod +x "${SPARKLER_BIN_DIR}/sparkler"
 }
 
 prompt_value() {
@@ -249,11 +261,12 @@ main() {
   say
   say "Sparkler is installed."
   say "Binary: ${SPARKLER_BIN_DIR}/sparkler"
+  say "Install root: ${INSTALL_ROOT_DIR}"
   say
   say "Next steps:"
-  say "  1. sparkler login"
+  say "  1. ./bin/sparkler login"
   say "  2. Wait for admin approval if your account shows as pending"
-  say "  3. sparkler host myscene.rad"
+  say "  3. ./bin/sparkler host myscene.rad"
   say
   say "If you prefer the safer manual installer flow next time:"
   say "  curl -fsSL https://<deployment>.convex.site/setup.sh -o setup.sh"

@@ -24,7 +24,7 @@ curl -fsSL https://<deployment>.convex.site/setup.sh -o setup.sh
 bash setup.sh
 ```
 
-That installer checks Node/npm, downloads the Sparkler source tarball from GitHub, runs `npm install` for `packages/cli`, optionally writes the Sparkler deployment config, and then points the user at `sparkler login`.
+That installer checks Node/npm, downloads the Sparkler source tarball from GitHub, runs `npm install` for `packages/cli`, keeps the install/config state in the current directory by default, and then points the user at `./bin/sparkler login`.
 
 ---
 
@@ -38,11 +38,13 @@ That installer checks Node/npm, downloads the Sparkler source tarball from GitHu
 
 1. Opens the Sparkler app’s `/cli-login` page in the browser.
 2. Uses Clerk to mint a Convex JWT and returns it to the CLI over a loopback callback.
-3. Writes **`~/.config/sparkler/credentials.json`** with:
+3. Writes **`$XDG_CONFIG_HOME/sparkler/credentials.json`** with:
    - **`convexUrl`** — `https://<deployment>.convex.cloud`
    - **`deploymentUrl`** — origin where the viewer app is served
    - **`accessToken`** — Clerk-issued Convex JWT
 4. Immediately verifies the account over `/api/cli/me`, so the user can see whether Sparkler access is already **approved** or still **pending** admin review.
+
+**Installer note:** the setup script now defaults `XDG_CONFIG_HOME` to `./.config`, so deleting the install directory removes the saved Sparkler config and login state too.
 
 **Fallbacks:**
 

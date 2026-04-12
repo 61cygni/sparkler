@@ -42,7 +42,7 @@ function loadCliEnv() {
 
 function loadConfig() {
   const fromEnv = process.env.SPARKLER_CONFIG;
-  const configPath = fromEnv ?? path.join(homedir(), ".config", "sparkler", "config.json");
+  const configPath = fromEnv ?? path.join(configHomeDir(), "sparkler", "config.json");
   if (!existsSync(configPath)) {
     return {};
   }
@@ -53,8 +53,12 @@ function loadConfig() {
   }
 }
 
+function configHomeDir() {
+  return process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config");
+}
+
 function credentialsPath() {
-  return path.join(homedir(), ".config", "sparkler", "credentials.json");
+  return path.join(configHomeDir(), "sparkler", "credentials.json");
 }
 
 function loadCredentials() {
@@ -376,7 +380,7 @@ async function cmdLogin(opts) {
   const deploy = deploymentUrl(config);
   if (!convexUrl) {
     console.error(
-      "Set SPARKLER_CONVEX_URL (https://….convex.cloud) or convexUrl in ~/.config/sparkler/config.json.",
+      "Set SPARKLER_CONVEX_URL (https://….convex.cloud) or convexUrl in $XDG_CONFIG_HOME/sparkler/config.json (defaults to ~/.config/sparkler/config.json).",
     );
     process.exit(1);
   }
