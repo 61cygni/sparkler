@@ -7,6 +7,7 @@ import Upload from "./pages/Upload.jsx";
 import Viewer from "./pages/Viewer.jsx";
 import Embed from "./pages/Embed.jsx";
 import CliLogin from "./pages/CliLogin.jsx";
+import CliLogout from "./pages/CliLogout.jsx";
 import AdminAccess from "./pages/AdminAccess.jsx";
 
 const clerkEnabled = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
@@ -39,7 +40,8 @@ export default function App() {
   const chromeless =
     pathname.startsWith("/s/") ||
     pathname.startsWith("/embed/") ||
-    pathname.startsWith("/cli-login");
+    pathname.startsWith("/cli-login") ||
+    pathname.startsWith("/cli-logout");
 
   return (
     <>
@@ -70,6 +72,7 @@ export default function App() {
         <Route path="/s/:sceneId" element={<Viewer />} />
         <Route path="/embed/:sceneId" element={<Embed />} />
         <Route path="/cli-login" element={<CliLogin />} />
+        <Route path="/cli-logout" element={<CliLogout />} />
         <Route path="/admin/access" element={<AdminAccess />} />
       </Routes>
     </>

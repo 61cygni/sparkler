@@ -83,6 +83,80 @@ function saveCredentials(value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+function parseJwtPayload(token) {
+  if (typeof token !== "string") {
+    return null;
+  }
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return null;
+  }
+  try {
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function tokenExpiryMs(token) {
+  const payload = parseJwtPayload(token);
+  return typeof payload?.exp === "number" && Number.isFinite(payload.exp) ? payload.exp * 1000 : null;
+}
+
+function tokenHasExpired(token, skewMs = 30_000) {
+  const expiryMs = tokenExpiryMs(token);
+  return expiryMs !== null && expiryMs <= Date.now() + skewMs;
+}
+
+function formatExpiry(token) {
+  const expiryMs = tokenExpiryMs(token);
+  return expiryMs ? new Date(expiryMs).toISOString() : null;
+}
+
+function cmdLogout(opts = {}) {
+  const filePath = credentialsPath();
+  const hadCredentials = existsSync(filePath);
+  rmSync(filePath, { force: true });
+  const config = loadConfig();
+  const deploy = deploymentUrl(config);
+  const result = {
+    ok: true,
+    removedCredentials: hadCredentials,
+    credentialsPath: filePath,
+    browserLogoutAttempted: Boolean(deploy),
+    browserOpened: false,
+    browserUrl: null,
+  };
+
+  if (deploy) {
+    result.browserUrl = `${deploy}/cli-logout`;
+    openBrowser(result.browserUrl);
+    result.browserOpened = true;
+  } else if (!opts.json) {
+    console.error(
+      "Removed local credentials, but could not open Clerk sign-out because no deployment URL is configured.",
+    );
+    console.error(
+      "Set SPARKLER_DEPLOYMENT_URL or deploymentUrl in $XDG_CONFIG_HOME/sparkler/config.json and try again.",
+    );
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (hadCredentials) {
+    console.log(`Removed saved credentials: ${filePath}`);
+  } else {
+    console.log(`No saved credentials found at ${filePath}`);
+  }
+
+  if (result.browserOpened) {
+    console.log(`Opened Clerk sign-out page: ${result.browserUrl}`);
+  }
+}
+
 function boolish(value) {
   if (typeof value === "boolean") {
     return value;
@@ -642,6 +716,15 @@ function requireUserHttpAuth(config) {
   };
 }
 
+function throwExpiredUserAuth(auth) {
+  const expiredAt = formatExpiry(auth.token);
+  throw new Error(
+    expiredAt
+      ? `Saved Clerk login expired at ${expiredAt}. Run sparkler login again.`
+      : "Saved Clerk login expired. Run sparkler login again.",
+  );
+}
+
 function requireAdminHttpAuth(config) {
   const token = cliToken();
   const siteUrl = convexSiteUrl(config);
@@ -700,14 +783,18 @@ function resolveSceneAuth(config, opts = {}) {
 }
 
 async function fetchCli(auth, endpoint, init, label) {
-  const prefix = auth.kind === "user" ? "/api/cli" : "/cli";
+  if (auth.kind === "user" && tokenHasExpired(auth.token)) {
+    throwExpiredUserAuth(auth);
+  }
+  const activeAuth = auth;
+  const prefix = activeAuth.kind === "user" ? "/api/cli" : "/cli";
   return await fetchJson(
-    `${auth.siteUrl}${prefix}/${endpoint}`,
+    `${activeAuth.siteUrl}${prefix}/${endpoint}`,
     {
       ...init,
       headers: {
         ...(init?.headers ?? {}),
-        Authorization: `Bearer ${auth.token}`,
+        Authorization: `Bearer ${activeAuth.token}`,
       },
     },
     label,
@@ -1099,6 +1186,21 @@ function cmdDashboard(opts) {
   openBrowser(deploy);
 }
 
+function cmdView(sceneId, opts) {
+  const config = loadConfig();
+  const deploy = requireDeploy(
+    config,
+    "Set SPARKLER_DEPLOYMENT_URL, run sparkler login, or add deploymentUrl to config for viewer links.",
+  );
+  const url = viewerUrlFor(deploy, sceneId);
+  if (opts.json) {
+    console.log(JSON.stringify({ sceneId, viewerUrl: url }, null, 2));
+  } else {
+    console.log(url);
+  }
+  openBrowser(url);
+}
+
 function cmdEmbedSnippet(sceneId, opts) {
   const config = loadConfig();
   const deploy = requireDeploy(
@@ -1130,9 +1232,11 @@ function cmdEmbedSnippet(sceneId, opts) {
 function printGlobalHelp() {
   console.log(`Usage:
   sparkler login [options]
+  sparkler logout [options]
   sparkler convert <input>... [-o <out.rad>] [-- <build-lod-args>...]
   sparkler host <file> [options]
   sparkler dashboard [options]
+  sparkler view <sceneId> [options]
   sparkler list [options]
   sparkler del <sceneId> [options]
   sparkler set-visibility <sceneId> <visibility> [options]
@@ -1142,9 +1246,11 @@ function printGlobalHelp() {
 
 Examples:
   sparkler login
+  sparkler logout
   sparkler host ./scan.spz
   sparkler convert scan.spz -o scan.rad
   sparkler dashboard
+  sparkler view jd7abc123
   sparkler list --verbose
   sparkler del jd7abc123 --yes
   sparkler set-visibility jd7abc123 public
@@ -1186,6 +1292,19 @@ function buildProgram() {
     });
 
   program
+    .command("logout")
+    .description("Remove the saved Clerk login token and sign out of Clerk in the browser")
+    .option("--json", "JSON output")
+    .action((opts) => {
+      try {
+        cmdLogout(opts);
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  program
     .command("convert")
     .allowUnknownOption(true)
     .argument("[files...]", "Input files")
@@ -1206,6 +1325,20 @@ function buildProgram() {
     .action((opts) => {
       try {
         cmdDashboard(opts);
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  program
+    .command("view")
+    .description("Open a hosted scene in your browser")
+    .argument("<sceneId>", "Convex scenes document id")
+    .option("--json", "JSON output")
+    .action((sceneId, opts) => {
+      try {
+        cmdView(sceneId, opts);
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

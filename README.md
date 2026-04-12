@@ -136,9 +136,11 @@ The installer defaults to the GitHub repo `61cygni/sparkler` and downloads the `
 | Command | Purpose |
 |---------|---------|
 | `sparkler login` | Opens `/cli-login` (Clerk). After sign-in, loopback saves your Convex JWT to `$XDG_CONFIG_HOME/sparkler/credentials.json` (the installer sets this to `./.config/sparkler/credentials.json` by default). |
+| `sparkler logout` | Removes the saved CLI token from `$XDG_CONFIG_HOME/sparkler/credentials.json` and, when the deployment URL is known, opens `/cli-logout` to sign out the active Clerk browser session too. |
 | `sparkler convert <input>... [-o out.rad] [-- <build-lod-args>]` | Runs Spark’s `npm run build-lod` (needs Rust toolchain + `../spark` or `SPARKLER_SPARK_ROOT`). Writes `<name>-lod.rad` next to each input unless `-o` is used (single input only). |
 | `sparkler host <file>` | **Clerk (default):** authenticated `/api/cli/*` routes on `*.convex.site` + presigned PUT + finalize. **Demo:** unauthenticated Convex calls with `--demo` / `SPARKLER_DEMO=1` and Convex `SPARKLER_DEMO_OWNER_SUBJECT`. **Admin automation:** shared-secret `/cli/*` + `SPARKLER_CLI_TOKEN`. Non-`.rad` files run through `build-lod` in a temp dir unless `--no-convert`. |
 | `sparkler dashboard` | Opens the Sparkler dashboard using the saved deployment URL from `sparkler login` or `SPARKLER_DEPLOYMENT_URL`. |
+| `sparkler view <sceneId>` | Opens the full viewer page for a specific scene and prints its URL. |
 | `sparkler list` | Lists your scenes. Works with `sparkler login`, demo mode, or the admin shared-secret env fallback. |
 | `sparkler del <sceneId>` | Deletes Tigris object and DB row. Works with `sparkler login`, demo mode, or the admin shared-secret env fallback. |
 | `sparkler set-visibility <sceneId> <visibility>` | Changes an existing scene to `public`, `unlisted`, or `private`. Works with `sparkler login`, demo mode, or the admin shared-secret env fallback. |
@@ -147,6 +149,8 @@ The installer defaults to the GitHub repo `61cygni/sparkler` and downloads the `
 | `sparkler embed-snippet <sceneId>` | Prints iframe HTML (or `--format md`) using saved deployment URL or `SPARKLER_DEPLOYMENT_URL`. |
 
 **Public Clerk CLI (`login`, `host`, `list`, `del`):**
+
+If the saved Clerk JWT has expired, user-scoped CLI commands now detect that locally and tell you to run `sparkler login` again instead of surfacing a raw Convex OIDC verification error.
 
 | Variable | Purpose |
 |----------|---------|

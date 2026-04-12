@@ -2,7 +2,7 @@
 
 This document describes a **CLI-first** workflow for turning a local splat file (`.spz`, `.ply`, …) into a **single shareable URL** on the open web: a hosted viewer page with good defaults (LoD `.rad`, paged streaming, movement controls, embed help, saved default view).
 
-**Status:** The CLI now implements `login`, `convert`, `host`, `dashboard`, `list`, `del`, `set-visibility`, `set-view`, `adopt-demo-scenes`, and `embed-snippet`. The default `host` conversion path is implemented, as are three auth modes: Clerk login, demo/no-auth dev mode, and shared-secret admin automation. The public installed CLI now uses authenticated `/api/cli/*` routes on `*.convex.site` instead of importing this repo’s generated Convex API directly. The full viewer now uses Spark paged loading for `.rad`, has `WASD` movement, `Shift` run, `Q/E` roll, `R/F` up/down, a mobile joystick, and a capture-to-thumbnail flow that feeds the dashboard cards. The main remaining target UX gaps are a more polished combined info/embed panel and any future VR-specific work.
+**Status:** The CLI now implements `login`, `logout`, `convert`, `host`, `dashboard`, `view`, `list`, `del`, `set-visibility`, `set-view`, `adopt-demo-scenes`, and `embed-snippet`. The default `host` conversion path is implemented, as are three auth modes: Clerk login, demo/no-auth dev mode, and shared-secret admin automation. The public installed CLI now uses authenticated `/api/cli/*` routes on `*.convex.site` instead of importing this repo’s generated Convex API directly. The full viewer now uses Spark paged loading for `.rad`, has `WASD` movement, `Shift` run, `Q/E` roll, `R/F` up/down, a mobile joystick, and a capture-to-thumbnail flow that feeds the dashboard cards. The main remaining target UX gaps are a more polished combined info/embed panel and any future VR-specific work.
 
 ---
 
@@ -57,6 +57,17 @@ That installer checks Node/npm, downloads the Sparkler source tarball from GitHu
 **Practical note:** The CLI now prefers saved Clerk credentials over an ambient `SPARKLER_DEMO=1` environment flag unless `--demo` is passed explicitly. This makes it safer to move from no-auth local testing to real auth without constantly editing `.env`.
 
 **Approval rule:** successful Clerk sign-in is necessary but not sufficient. Protected commands are blocked until the user’s Sparkler account has `approvalStatus = approved`.
+
+### 1b. `sparkler logout`
+
+**Purpose:** Remove the saved local Clerk login token so the CLI stops acting as the current signed-in user.
+
+**Behavior (implemented):**
+
+1. Deletes `$XDG_CONFIG_HOME/sparkler/credentials.json` if it exists.
+2. Prints the removed path (or reports that no saved credentials were present).
+3. If the deployment URL is known, opens `/cli-logout`, which signs the active Clerk browser session out and then redirects to a signed-out confirmation page.
+4. Leaves the local install, config file, and hosted Sparkler account otherwise untouched.
 
 ---
 

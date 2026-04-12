@@ -5,6 +5,22 @@ import { components } from "./_generated/api";
 import { httpAction, type ActionCtx } from "./_generated/server";
 
 const jsonHeaders = { "Content-Type": "application/json; charset=utf-8" };
+type HttpActionCtx = Parameters<typeof httpAction>[0] extends (
+  ctx: infer C,
+  request: Request,
+) => Promise<Response>
+  ? C
+  : never;
+type CliUserStatus = {
+  subject: string;
+  email: string | null;
+  name: string | null;
+  role: "user" | "admin";
+  approvalStatus: "pending" | "approved" | "rejected";
+  isAdmin: boolean;
+  isApproved: boolean;
+  isDemo: boolean;
+};
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) {
@@ -46,7 +62,7 @@ function jsonError(message: string, status: number) {
 }
 
 async function requireCliUser(
-  ctx: ActionCtx,
+  ctx: HttpActionCtx,
   allowPending = false,
 ): Promise<
   | {
@@ -56,7 +72,7 @@ async function requireCliUser(
   | {
       ok: true;
       identity: NonNullable<Awaited<ReturnType<ActionCtx["auth"]["getUserIdentity"]>>>;
-      status: Awaited<ReturnType<ActionCtx["runMutation"]>>;
+      status: CliUserStatus;
     }
 > {
   const identity = await ctx.auth.getUserIdentity();
