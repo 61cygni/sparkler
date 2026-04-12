@@ -1,0 +1,71 @@
+import { Link, Route, Routes, useLocation } from "react-router-dom";
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
+import Home from "./pages/Home.jsx";
+import Upload from "./pages/Upload.jsx";
+import Viewer from "./pages/Viewer.jsx";
+import Embed from "./pages/Embed.jsx";
+import CliLogin from "./pages/CliLogin.jsx";
+
+const clerkEnabled = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+
+function AuthChrome() {
+  if (!clerkEnabled) {
+    return (
+      <span className="muted" style={{ fontSize: "0.85rem" }}>
+        Dev mode: set <code>SPARKLER_DEMO_OWNER_SUBJECT</code> in Convex to upload
+      </span>
+    );
+  }
+  return (
+    <>
+      <SignedOut>
+        <SignInButton mode="modal">
+          <button type="button">Sign in</button>
+        </SignInButton>
+      </SignedOut>
+      <SignedIn>
+        <UserButton afterSignOutUrl="/" />
+      </SignedIn>
+    </>
+  );
+}
+
+export default function App() {
+  const { pathname } = useLocation();
+  const chromeless =
+    pathname.startsWith("/s/") ||
+    pathname.startsWith("/embed/") ||
+    pathname.startsWith("/cli-login");
+
+  return (
+    <>
+      {!chromeless ? (
+        <header
+          style={{
+            borderBottom: "1px solid #2d323c",
+            padding: "0.75rem 1.5rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "1rem",
+          }}
+        >
+          <nav style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
+            <Link to="/" style={{ fontWeight: 700 }}>
+              Sparkler
+            </Link>
+            <Link to="/upload">Upload</Link>
+          </nav>
+          <AuthChrome />
+        </header>
+      ) : null}
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/upload" element={<Upload />} />
+        <Route path="/s/:sceneId" element={<Viewer />} />
+        <Route path="/embed/:sceneId" element={<Embed />} />
+        <Route path="/cli-login" element={<CliLogin />} />
+      </Routes>
+    </>
+  );
+}

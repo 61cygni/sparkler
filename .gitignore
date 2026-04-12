@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+.env.*
+.env.local
+.env*.local
+!.env.local.example
+.convex
+.agents
+.claude
+*.swp
+skills-lock.json
+convex/_generated/ai/ai-files.state.json
+view.json
