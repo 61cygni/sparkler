@@ -1,0 +1,23 @@
+{
+  "name": "@sparkjsdev/spark",
+  "version": "0.1.9-sparkler-vendored",
+  "description": "Vendored Spark 2.0 build for temporary Sparkler testing",
+  "type": "module",
+  "main": "./dist/spark.cjs.js",
+  "module": "./dist/spark.module.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/spark.module.js",
+      "require": "./dist/spark.cjs.js"
+    }
+  },
+  "license": "MIT",
+  "dependencies": {
+    "fflate": "^0.8.2"
+  },
+  "peerDependencies": {
+    "three": "^0.180.0"
+  }
+}

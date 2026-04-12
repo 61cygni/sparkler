@@ -37,6 +37,34 @@ function looksLikeRad(path) {
   return path.toLowerCase().includes(".rad");
 }
 
+function fileExtension(pathLike) {
+  if (!pathLike || typeof pathLike !== "string") {
+    return null;
+  }
+  const cleaned = pathLike.split("#", 1)[0].split("?", 1)[0];
+  const base = cleaned.split("/").pop() ?? cleaned;
+  const i = base.lastIndexOf(".");
+  if (i < 0 || i === base.length - 1) {
+    return null;
+  }
+  return base.slice(i + 1).toLowerCase();
+}
+
+function inferSplatFileType(filename, url) {
+  const ext = fileExtension(filename) ?? fileExtension(url);
+  switch (ext) {
+    case "ply":
+    case "spz":
+    case "splat":
+    case "ksplat":
+    case "sog":
+    case "rad":
+      return ext;
+    default:
+      return undefined;
+  }
+}
+
 async function createThumbnailBlob(sourceCanvas) {
   if (!sourceCanvas || sourceCanvas.width < 1 || sourceCanvas.height < 1) {
     throw new Error("Viewer is not ready to capture a thumbnail yet");
@@ -354,8 +382,10 @@ export default function SplatViewer({
       let splatMesh;
       try {
         const paged = looksLikeRad(filename) || looksLikeRad(url);
+        const fileType = inferSplatFileType(filename, url);
         const meshOptions = {
           url,
+          ...(fileType ? { fileType } : {}),
           lod: paged ? "quality" : true,
           paged,
           ...(paged ? {} : { extSplats: true }),
@@ -400,7 +430,9 @@ export default function SplatViewer({
       if (cancelled) {
         debugLog(sceneId, "cancelled after mesh initialization");
         scene.remove(splatMesh);
-        splatMesh.dispose();
+        if (typeof splatMesh.dispose === "function") {
+          splatMesh.dispose();
+        }
         scene.remove(spark);
         spark.dispose();
         renderCanvasRef.current = null;
@@ -467,7 +499,9 @@ export default function SplatViewer({
         }
         if (splatMesh) {
           scene.remove(splatMesh);
-          splatMesh.dispose();
+          if (typeof splatMesh.dispose === "function") {
+            splatMesh.dispose();
+          }
         }
         localFrame.remove(camera);
         scene.remove(localFrame);
