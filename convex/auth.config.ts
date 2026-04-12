@@ -1,6 +1,14 @@
 import type { AuthConfig } from "convex/server";
 
-// Local demo mode: keep Convex auth disabled unless/until Clerk is wired back in.
+const clerkIssuer = process.env.CLERK_JWT_ISSUER?.trim();
+
 export default {
-  providers: [],
+  providers: clerkIssuer
+    ? [
+        {
+          domain: clerkIssuer,
+          applicationID: "convex",
+        },
+      ]
+    : [],
 } satisfies AuthConfig;

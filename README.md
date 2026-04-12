@@ -39,7 +39,7 @@ Vite + React (JavaScript) app for hosting Gaussian splats: **Convex** (metadata 
    | `SPARKLER_DEMO_OWNER_SUBJECT` | **Dev only.** Fake “user id” for uploads when Clerk is not configured. Also powers CLI `--demo` / `SPARKLER_DEMO=1`. Remove in production. |
    | `SPARKLER_CLI_SECRET` | **CLI uploads.** Shared secret; CLI sends `Authorization: Bearer <same value>` as `SPARKLER_CLI_TOKEN`. |
    | `SPARKLER_CLI_OWNER_SUBJECT` | **CLI uploads.** Stable owner id stored on scenes created via HTTP CLI (e.g. `cli:prod`). Must be set if `SPARKLER_CLI_SECRET` is set. |
-   | `CLERK_JWT_ISSUER` | If using Clerk: issuer URL (e.g. `https://your-app.clerk.accounts.dev`) |
+   | `CLERK_JWT_ISSUER` | If using Clerk: issuer URL (e.g. `https://your-app.clerk.accounts.dev`). When set, `convex/auth.config.ts` enables Clerk auth; if unset, Convex stays in demo/no-auth mode. |
 
 4. **Frontend `.env.local`**
 
@@ -49,6 +49,16 @@ Vite + React (JavaScript) app for hosting Gaussian splats: **Convex** (metadata 
 
    Set `VITE_CONVEX_URL` from the Convex dashboard.  
    Optional: `VITE_CLERK_PUBLISHABLE_KEY` for [Clerk](https://clerk.com/) + Convex ([integration guide](https://docs.convex.dev/auth/clerk)).
+
+### Clerk setup for `sparkler login`
+
+If you want the CLI login flow to work end to end, make sure all three of these are configured:
+
+1. In Clerk, create a JWT template named `convex`.
+2. In Convex environment variables, set `CLERK_JWT_ISSUER` to your Clerk issuer URL.
+3. In the frontend build environment, set `VITE_CLERK_PUBLISHABLE_KEY`.
+
+After those are set, `sparkler login` opens `/cli-login`, Clerk signs you in, the page requests a Convex JWT from the `convex` template, and the CLI stores it in `~/.config/sparkler/credentials.json`.
 
 5. **Tigris CORS**
 
@@ -70,9 +80,12 @@ Binary: `npx sparkler` from this repo (or `npm link` / global install with `pack
 | `sparkler login` | Opens `/cli-login` (Clerk). After sign-in, loopback saves your Convex JWT to `~/.config/sparkler/credentials.json`. |
 | `sparkler convert <input>... [-o out.rad] [-- <build-lod-args>]` | Runs Spark’s `npm run build-lod` (needs Rust toolchain + `../spark` or `SPARKLER_SPARK_ROOT`). Writes `<name>-lod.rad` next to each input unless `-o` is used (single input only). |
 | `sparkler host <file>` | **Clerk (default):** Convex mutations + presigned PUT + finalize. **Demo:** unauthenticated Convex calls with `--demo` / `SPARKLER_DEMO=1` and Convex `SPARKLER_DEMO_OWNER_SUBJECT`. **HTTP:** `/cli/*` + `SPARKLER_CLI_TOKEN`. Non-`.rad` files run through `build-lod` in a temp dir unless `--no-convert`. |
+| `sparkler dashboard` | Opens the Sparkler dashboard using the saved deployment URL from `sparkler login` or `SPARKLER_DEPLOYMENT_URL`. |
 | `sparkler list` | Lists your scenes. Works with `sparkler login`, demo mode, or the HTTP CLI env fallback. |
 | `sparkler del <sceneId>` | Deletes Tigris object and DB row. Works with `sparkler login`, demo mode, or the HTTP CLI env fallback. |
+| `sparkler set-visibility <sceneId> <visibility>` | Changes an existing scene to `public`, `unlisted`, or `private`. Works with `sparkler login`, demo mode, or the HTTP CLI env fallback. |
 | `sparkler set-view <sceneId>` | Saves the scene’s default camera view from copied HUD JSON (`--view-file` or `--view-json`). Works with `sparkler login`, demo mode, or the HTTP CLI env fallback. |
+| `sparkler adopt-demo-scenes` | One-time migration: moves scenes owned by `SPARKLER_DEMO_OWNER_SUBJECT` onto your signed-in Clerk account. Requires `sparkler login`; do not use `--demo`. |
 | `sparkler embed-snippet <sceneId>` | Prints iframe HTML (or `--format md`) using saved deployment URL or `SPARKLER_DEPLOYMENT_URL`. |
 
 **Clerk CLI (`login`, `host`, `list`, `del`):**
@@ -106,6 +119,22 @@ Binary: `npx sparkler` from this repo (or `npm link` / global install with `pack
 Optional config file: `~/.config/sparkler/config.json` with `convexSiteUrl`, `deploymentUrl`, `convexUrl` (used to infer `.convex.site` from `.convex.cloud`).
 
 The CLI now auto-loads `.env` and `.env.local` from your current working directory. If you want a different file, set `SPARKLER_ENV_FILE=/path/to/file.env`.
+
+### Adopting old demo scenes
+
+If you uploaded scenes before Clerk was configured and they were owned by `SPARKLER_DEMO_OWNER_SUBJECT`, you can move them onto your real Clerk account after running `sparkler login`:
+
+```bash
+node cli/bin/sparkler.mjs adopt-demo-scenes
+```
+
+If you have a lot of scenes, run it again while it reports more remaining work.
+
+Once a scene is yours, you can change it to public with:
+
+```bash
+node cli/bin/sparkler.mjs set-visibility <sceneId> public
+```
 
 ### No-auth local testing
 

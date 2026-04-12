@@ -105,9 +105,19 @@ export default function CliLogin() {
       <main style={{ padding: "2rem", maxWidth: 520 }}>
         <h1 style={{ marginTop: 0 }}>CLI login</h1>
         <p>
-          Set <code>VITE_CLERK_PUBLISHABLE_KEY</code> and <code>CLERK_JWT_ISSUER</code> on Convex to use{" "}
-          <code>sparkler login</code>.
+          To use <code>sparkler login</code>, configure Clerk on both sides:
         </p>
+        <ul>
+          <li>
+            Frontend: set <code>VITE_CLERK_PUBLISHABLE_KEY</code> in the app build environment.
+          </li>
+          <li>
+            Convex: set <code>CLERK_JWT_ISSUER</code> in the Convex environment.
+          </li>
+          <li>
+            Clerk: create a JWT template named <code>convex</code> so this page can request a Convex token.
+          </li>
+        </ul>
         <p>
           <Link to="/">Home</Link>
         </p>

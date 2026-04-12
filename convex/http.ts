@@ -405,6 +405,64 @@ http.route({
   }),
 });
 
+http.route({
+  path: "/cli/set-visibility",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.SPARKLER_CLI_SECRET) {
+      return new Response(
+        JSON.stringify({ error: "CLI is disabled (SPARKLER_CLI_SECRET not set)" }),
+        { status: 503, headers: jsonHeaders },
+      );
+    }
+    if (!cliAuth(request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: jsonHeaders,
+      });
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+
+    const sceneId = body.sceneId;
+    if (typeof sceneId !== "string" || !sceneId.trim()) {
+      return new Response(JSON.stringify({ error: "sceneId is required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    const visibility = parseVisibility(body.visibility);
+
+    try {
+      await ctx.runMutation(internal.scenes.updateVisibilityForCli, {
+        sceneId: sceneId.trim() as never,
+        visibility,
+      });
+      return new Response(
+        JSON.stringify({ ok: true, sceneId: sceneId.trim(), visibility }),
+        {
+          status: 200,
+          headers: jsonHeaders,
+        },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+  }),
+});
+
 registerStaticRoutes(http, selfHosting);
 
 export default http;

@@ -235,7 +235,14 @@ function boolish(value) {
 }
 
 function demoMode(config, opts = {}) {
-  return Boolean(opts.demo) || boolish(process.env.SPARKLER_DEMO) || config.demoMode === true;
+  if (Boolean(opts.demo)) {
+    return true;
+  }
+  const hasSavedClerkCreds = Boolean(loadCredentials()?.accessToken);
+  if (hasSavedClerkCreds) {
+    return false;
+  }
+  return boolish(process.env.SPARKLER_DEMO) || config.demoMode === true;
 }
 
 function deployForViewerLinks(config) {
@@ -270,6 +277,14 @@ function logPhase(opts, message) {
 function formatCreatedAt(ts) {
   if (typeof ts !== "number" || !Number.isFinite(ts)) return "";
   return new Date(ts).toISOString().replace(".000Z", "Z");
+}
+
+function normalizeVisibilityOrExit(value) {
+  if (value === "public" || value === "unlisted" || value === "private") {
+    return value;
+  }
+  console.error("Visibility must be one of: public, unlisted, private");
+  process.exit(1);
 }
 
 function enrichScene(scene, deploy) {
@@ -367,10 +382,14 @@ const RECEIVE_PAGE = `<!DOCTYPE html>
 function waitForCliToken(port, onListening) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    const sockets = new Set();
     const server = createServer((req, res) => {
       const u = new URL(req.url || "/", `http://127.0.0.1:${port}`);
       if (req.method === "GET" && u.pathname === "/receive") {
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          Connection: "close",
+        });
         res.end(RECEIVE_PAGE);
         return;
       }
@@ -393,9 +412,20 @@ function waitForCliToken(port, onListening) {
               return;
             }
             settled = true;
-            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("OK");
-            server.close(() => resolve({ accessToken: j.accessToken }));
+            res.writeHead(200, {
+              "Content-Type": "text/plain; charset=utf-8",
+              Connection: "close",
+            });
+            res.end("OK", () => {
+              resolve({ accessToken: j.accessToken });
+              server.close();
+              if (typeof server.closeAllConnections === "function") {
+                server.closeAllConnections();
+              }
+              for (const socket of sockets) {
+                socket.destroy();
+              }
+            });
           } catch (e) {
             res.writeHead(400);
             res.end(String(e?.message || e));
@@ -405,6 +435,12 @@ function waitForCliToken(port, onListening) {
       }
       res.writeHead(404);
       res.end();
+    });
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.on("close", () => {
+        sockets.delete(socket);
+      });
     });
     server.on("error", reject);
     server.listen(port, "127.0.0.1", () => {
@@ -561,6 +597,18 @@ function requireClerkClient(config, opts = {}) {
   const authConvexUrl = creds?.convexUrl || cUrl;
   if (!creds?.accessToken || !authConvexUrl) {
     return null;
+  }
+  const client = new ConvexHttpClient(authConvexUrl);
+  client.setAuth(creds.accessToken);
+  return client;
+}
+
+function requireSavedClerkClient(config) {
+  const creds = loadCredentials();
+  const authConvexUrl = creds?.convexUrl || convexCloudUrl(config);
+  if (!creds?.accessToken || !authConvexUrl) {
+    console.error("Run sparkler login first to save a Clerk-issued Convex token.");
+    process.exit(1);
   }
   const client = new ConvexHttpClient(authConvexUrl);
   client.setAuth(creds.accessToken);
@@ -976,6 +1024,78 @@ async function cmdSetView(sceneId, opts) {
   }
 }
 
+async function cmdSetVisibility(sceneId, visibilityInput, opts) {
+  const config = loadConfig();
+  const auth = requireDeleteAuth(config, opts);
+  const visibility = normalizeVisibilityOrExit(visibilityInput);
+
+  if (auth.kind === "clerk" || auth.kind === "demo") {
+    await auth.client.mutation(api.scenes.updateSceneVisibility, {
+      sceneId,
+      visibility,
+    });
+  } else {
+    await fetchJsonOrExit(
+      `${auth.siteUrl}/cli/set-visibility`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ sceneId, visibility }),
+      },
+      "set-visibility",
+    );
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify({ ok: true, sceneId, visibility }, null, 2));
+  } else {
+    console.log(`Set visibility for ${sceneId} to ${visibility}`);
+  }
+}
+
+async function cmdAdoptDemoScenes(opts) {
+  const config = loadConfig();
+  if (demoMode(config, opts)) {
+    console.error("adopt-demo-scenes requires a real Clerk login. Do not use --demo.");
+    process.exit(1);
+  }
+  const client = requireSavedClerkClient(config);
+  const result = await client.mutation(api.scenes.adoptDemoScenes, {
+    batchSize: Number.parseInt(String(opts.batchSize ?? "200"), 10) || 200,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.log(
+    `Adopted ${result.updated} scene(s) from ${result.demoSubject} to ${result.adoptedSubject}.`,
+  );
+  if (result.hasMore) {
+    console.log("More demo-owned scenes may remain; run the command again if needed.");
+  }
+}
+
+function cmdDashboard(opts) {
+  const config = loadConfig();
+  const deploy = deployForViewerLinks(config);
+  if (!deploy) {
+    console.error(
+      "Set SPARKLER_DEPLOYMENT_URL, run sparkler login, or add deploymentUrl to config for dashboard links.",
+    );
+    process.exit(1);
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify({ dashboardUrl: deploy }, null, 2));
+  } else {
+    console.log(deploy);
+  }
+  openBrowser(deploy);
+}
+
 function cmdEmbedSnippet(sceneId, opts) {
   const config = loadConfig();
   const deploy = deployForViewerLinks(config);
@@ -1012,9 +1132,12 @@ function printGlobalHelp() {
   sparkler login [options]
   sparkler convert <input>... [-o <out.rad>] [-- <build-lod-args>...]
   sparkler host <file> [options]
+  sparkler dashboard [options]
   sparkler list [options]
   sparkler del <sceneId> [options]
+  sparkler set-visibility <sceneId> <visibility> [options]
   sparkler set-view <sceneId> [options]
+  sparkler adopt-demo-scenes [options]
   sparkler embed-snippet <sceneId> [options]
 
 Examples:
@@ -1022,10 +1145,13 @@ Examples:
   sparkler host ./scan.spz --demo
   sparkler convert scan.spz -o scan.rad
   sparkler host ./scan.spz --visibility public
+  sparkler dashboard
   sparkler host ./model.ply --quick
   sparkler list --demo --verbose
   sparkler del jd7abc123 --demo --yes
+  sparkler set-visibility jd7abc123 public
   sparkler set-view jd7abc123 --view-file ./view.json
+  sparkler adopt-demo-scenes
   sparkler embed-snippet jd7abc123 --format md
 
 Environment:
@@ -1078,6 +1204,19 @@ Output defaults to <name>-lod.rad beside each input.`);
     .action(async (opts) => {
       try {
         await cmdLogin(opts);
+      } catch (e) {
+        console.error(e.message || e);
+        process.exit(1);
+      }
+    });
+
+  program
+    .command("dashboard")
+    .description("Open the Sparkler dashboard in your browser")
+    .option("--json", "JSON output")
+    .action((opts) => {
+      try {
+        cmdDashboard(opts);
       } catch (e) {
         console.error(e.message || e);
         process.exit(1);
@@ -1155,6 +1294,36 @@ Output defaults to <name>-lod.rad beside each input.`);
     .action(async (sceneId, opts) => {
       try {
         await cmdSetView(sceneId, opts);
+      } catch (e) {
+        console.error(e.message || e);
+        process.exit(1);
+      }
+    });
+
+  program
+    .command("set-visibility")
+    .description("Update a scene's visibility")
+    .argument("<sceneId>", "Convex scenes document id")
+    .argument("<visibility>", "public | unlisted | private")
+    .option("--demo", "Use unauthenticated demo mode (needs Convex SPARKLER_DEMO_OWNER_SUBJECT)")
+    .option("--json", "JSON output")
+    .action(async (sceneId, visibility, opts) => {
+      try {
+        await cmdSetVisibility(sceneId, visibility, opts);
+      } catch (e) {
+        console.error(e.message || e);
+        process.exit(1);
+      }
+    });
+
+  program
+    .command("adopt-demo-scenes")
+    .description("Move scenes owned by SPARKLER_DEMO_OWNER_SUBJECT onto your signed-in Clerk account")
+    .option("--batch-size <n>", "Max scenes to adopt in one run", "200")
+    .option("--json", "JSON output")
+    .action(async (opts) => {
+      try {
+        await cmdAdoptDemoScenes(opts);
       } catch (e) {
         console.error(e.message || e);
         process.exit(1);

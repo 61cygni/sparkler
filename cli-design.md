@@ -2,7 +2,7 @@
 
 This document describes a **CLI-first** workflow for turning a local splat file (`.spz`, `.ply`, …) into a **single shareable URL** on the open web: a hosted viewer page with good defaults (LoD `.rad`, paged streaming, movement controls, embed help, saved default view).
 
-**Status:** The CLI now implements `login`, `convert`, `host`, `list`, `del`, `set-view`, and `embed-snippet`. The default `host` conversion path is implemented, as are three auth modes: Clerk login, demo/no-auth dev mode, and HTTP bearer fallback. The full viewer now uses Spark paged loading for `.rad`, has `WASD` movement, `Shift` run, `Q/E` roll, `R/F` up/down, a mobile joystick, and a capture-to-thumbnail flow that feeds the dashboard cards. The main remaining target UX gaps are a more polished combined info/embed panel and any future VR-specific work.
+**Status:** The CLI now implements `login`, `convert`, `host`, `dashboard`, `list`, `del`, `set-visibility`, `set-view`, `adopt-demo-scenes`, and `embed-snippet`. The default `host` conversion path is implemented, as are three auth modes: Clerk login, demo/no-auth dev mode, and HTTP bearer fallback. The full viewer now uses Spark paged loading for `.rad`, has `WASD` movement, `Shift` run, `Q/E` roll, `R/F` up/down, a mobile joystick, and a capture-to-thumbnail flow that feeds the dashboard cards. The main remaining target UX gaps are a more polished combined info/embed panel and any future VR-specific work.
 
 ---
 
@@ -41,6 +41,8 @@ That’s the **default story**. Everything else (explicit convert-only, raw uplo
 - **Config/env loading:** the CLI auto-loads `.env` and `.env.local` from the current working directory, and honors `SPARKLER_ENV_FILE`
 
 **Design rule:** After a successful `login`, **`sparkler host`** should work with **zero extra env vars**.
+
+**Practical note:** The CLI now prefers saved Clerk credentials over an ambient `SPARKLER_DEMO=1` environment flag unless `--demo` is passed explicitly. This makes it safer to move from no-auth local testing to real auth without constantly editing `.env`.
 
 ---
 
@@ -155,6 +157,18 @@ sparkler convert scan.spz -o scan.rad -- --quality
 
 Still useful for **automation** and **CI**; for humans, a future in-view info/embed panel should eventually replace the current CLI-first snippet workflow.
 
+### `sparkler dashboard` (small but useful)
+
+Open the main Sparkler dashboard in the browser using the saved `deploymentUrl` from `sparkler login` (or `SPARKLER_DEPLOYMENT_URL` / config fallback).
+
+**Synopsis**
+
+```bash
+sparkler dashboard
+```
+
+This is mostly a convenience command, but it makes the “CLI-first” flow smoother when you want to jump from a terminal task back into the web UI.
+
 ### `sparkler set-view <sceneId>` (advanced but very useful)
 
 Persist the viewer’s **default camera pose** for a hosted scene.
@@ -264,6 +278,50 @@ sparkler delete <sceneId>
 
 ---
 
+### `sparkler set-visibility <sceneId> <visibility>`
+
+**Purpose:** Change an existing scene between `public`, `unlisted`, and `private` after upload.
+
+**Synopsis**
+
+```bash
+sparkler set-visibility <sceneId> public
+sparkler set-visibility <sceneId> unlisted
+sparkler set-visibility <sceneId> private
+```
+
+**Behavior**
+
+1. Authenticate like `host` / `list` / `del`.
+2. Verify the scene is owned by the current identity.
+3. Patch the scene’s `visibility` in Convex.
+4. Print confirmation (or JSON with `--json`).
+
+This fills the gap between “upload with initial visibility” and “later decide which scenes should appear in the gallery.”
+
+---
+
+### `sparkler adopt-demo-scenes`
+
+**Purpose:** One-time migration for people who uploaded scenes before Clerk was configured and now want those demo-owned scenes attached to their real signed-in account.
+
+**Synopsis**
+
+```bash
+sparkler adopt-demo-scenes
+```
+
+**Behavior**
+
+1. Requires a real Clerk-backed `sparkler login`.
+2. Reads `SPARKLER_DEMO_OWNER_SUBJECT` from Convex.
+3. Moves scenes owned by that demo subject onto the authenticated Clerk subject in batches.
+4. Prints how many scenes were adopted and whether more may remain.
+
+**Design note:** This command intentionally refuses `--demo`. It exists specifically to bridge the no-auth bootstrap phase into a real authenticated account.
+
+---
+
 ## Embedding (summary)
 
 - **iframe URL:** `{deploymentUrl}/embed/{sceneId}`  
@@ -304,7 +362,7 @@ SPARKLER_DEPLOYMENT_URL=http://localhost:5173
 
 - **Tigris** for blobs; **Convex** for metadata and presigned uploads.
 - **HTTP routes** under `https://<deployment>.convex.site/cli/...`:
-  - Implemented: **upload session**, **finalize**, **mark-failed**, **list**, **delete**, **set-view**.
+  - Implemented: **upload session**, **finalize**, **mark-failed**, **list**, **delete**, **set-view**, **set-visibility**.
 - **Design principle:** CLI never holds Tigris keys for reads/writes of arbitrary buckets—presigned PUT for upload; **server-side delete** uses the same Convex-provisioned Tigris credentials as today’s presign path.
 
 ---
@@ -330,10 +388,13 @@ SPARKLER_DEPLOYMENT_URL=http://localhost:5173
 | User intent | Commands |
 |-------------|----------|
 | **“I want a link to my scan.”** | `sparkler login` → `sparkler host file.spz` |
+| **“Open the web UI.”** | `sparkler dashboard` |
 | **“What have I uploaded?”** | `sparkler list` |
 | **“Remove this one.”** | `sparkler del <sceneId>` |
+| **“Make this one public.”** | `sparkler set-visibility <sceneId> public` |
 | **“Start this scene from a good angle.”** | `Copy view` in `/s/:sceneId` → `sparkler set-view <sceneId> --view-file ./view.json` |
+| **“Keep my old demo uploads.”** | `sparkler login` → `sparkler adopt-demo-scenes` |
 | **“I only want a local .rad.”** | `sparkler convert …` |
 | **“I need iframe HTML in CI.”** | `sparkler embed-snippet <id>` |
 
-**Hosting should feel incredibly simple:** choose auth once (login, demo, or bearer), host any supported splat file, get back **one URL** that works well on desktop and mobile, then optionally save a polished default view with `sparkler set-view` and curate your library with `list` / `del`.
+**Hosting should feel incredibly simple:** choose auth once (login, demo, or bearer), host any supported splat file, get back **one URL** that works well on desktop and mobile, then optionally save a polished default view with `sparkler set-view` and curate your library with `dashboard`, `list`, `set-visibility`, and `del`.

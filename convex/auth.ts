@@ -44,6 +44,16 @@ export async function requireViewerSubjectAction(
   );
 }
 
+export async function requireAuthenticatedSubject(
+  ctx: QueryOrMutationCtx,
+): Promise<string> {
+  const id = await ctx.auth.getUserIdentity();
+  if (id?.subject) {
+    return id.subject;
+  }
+  throw new Error("Not authenticated");
+}
+
 export async function getViewerSubjectAction(
   ctx: GenericActionCtx<DataModel>,
 ): Promise<string | null> {

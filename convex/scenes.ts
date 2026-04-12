@@ -7,13 +7,23 @@ import {
   mutation,
   query,
 } from "./_generated/server";
-import { getViewerSubject, requireViewerSubject } from "./auth";
+import {
+  getViewerSubject,
+  requireAuthenticatedSubject,
+  requireViewerSubject,
+} from "./auth";
 
 const defaultViewValidator = v.object({
   position: v.array(v.number()),
   target: v.array(v.number()),
   quaternion: v.optional(v.array(v.number())),
 });
+
+const visibilityValidator = v.union(
+  v.literal("public"),
+  v.literal("unlisted"),
+  v.literal("private"),
+);
 
 const ALLOWED_EXT = new Set([
   "ply",
@@ -40,8 +50,30 @@ function cliOwnerSubject(): string {
   return o;
 }
 
+function demoOwnerSubject(): string {
+  const subject = process.env.SPARKLER_DEMO_OWNER_SUBJECT?.trim();
+  if (!subject) {
+    throw new Error("SPARKLER_DEMO_OWNER_SUBJECT is not set in Convex environment");
+  }
+  return subject;
+}
+
 function thumbnailStorageKey(sceneId: Id<"scenes">): string {
   return `thumbnails/${sceneId}.jpg`;
+}
+
+async function updateSceneVisibilityForOwner(
+  ctx: MutationCtx,
+  sceneId: Id<"scenes">,
+  ownerSubject: string,
+  visibility: "public" | "unlisted" | "private",
+) {
+  const scene = await ctx.db.get(sceneId);
+  if (!scene || scene.ownerSubject !== ownerSubject) {
+    throw new Error("Forbidden");
+  }
+  await ctx.db.patch(sceneId, { visibility });
+  return null;
 }
 
 async function insertPendingScene(
@@ -330,6 +362,60 @@ export const updateSceneDefaultView = mutation({
   },
 });
 
+export const updateSceneVisibility = mutation({
+  args: {
+    sceneId: v.id("scenes"),
+    visibility: visibilityValidator,
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const ownerSubject = await requireViewerSubject(ctx);
+    return await updateSceneVisibilityForOwner(
+      ctx,
+      args.sceneId,
+      ownerSubject,
+      args.visibility,
+    );
+  },
+});
+
+export const adoptDemoScenes = mutation({
+  args: { batchSize: v.optional(v.number()) },
+  returns: v.object({
+    updated: v.number(),
+    hasMore: v.boolean(),
+    adoptedSubject: v.string(),
+    demoSubject: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const adoptedSubject = await requireAuthenticatedSubject(ctx);
+    const demoSubject = demoOwnerSubject();
+    if (adoptedSubject === demoSubject) {
+      throw new Error("Authenticated subject already matches SPARKLER_DEMO_OWNER_SUBJECT");
+    }
+
+    const batchSize = Math.max(1, Math.min(args.batchSize ?? 200, 200));
+    const rows = await ctx.db
+      .query("scenes")
+      .withIndex("by_owner_created", (q) => q.eq("ownerSubject", demoSubject))
+      .order("desc")
+      .take(batchSize);
+
+    for (const row of rows) {
+      await ctx.db.patch(row._id, {
+        ownerSubject: adoptedSubject,
+      });
+    }
+
+    return {
+      updated: rows.length,
+      hasMore: rows.length === batchSize,
+      adoptedSubject,
+      demoSubject,
+    };
+  },
+});
+
 export const saveSceneThumbnail = mutation({
   args: {
     sceneId: v.id("scenes"),
@@ -448,5 +534,20 @@ export const updateDefaultViewForCli = internalMutation({
       defaultView: args.defaultView,
     });
     return null;
+  },
+});
+
+export const updateVisibilityForCli = internalMutation({
+  args: {
+    sceneId: v.id("scenes"),
+    visibility: visibilityValidator,
+  },
+  handler: async (ctx, args) => {
+    return await updateSceneVisibilityForOwner(
+      ctx,
+      args.sceneId,
+      cliOwnerSubject(),
+      args.visibility,
+    );
   },
 });
