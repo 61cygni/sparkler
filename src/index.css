@@ -176,6 +176,28 @@ code {
   font-size: 0.92rem;
 }
 
+.terminal-panel__prose {
+  padding: 1rem 1.1rem;
+  color: #8ed79b;
+  background:
+    radial-gradient(circle at top, rgba(90, 255, 130, 0.08), transparent 42%),
+    repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.02) 0,
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+}
+
+.terminal-panel__prose p {
+  margin: 0 0 1rem;
+}
+
+.terminal-panel__prose p:last-child {
+  margin-bottom: 0;
+}
+
 .terminal-panel code {
   color: #7dff9b;
   background: rgba(34, 79, 38, 0.55);

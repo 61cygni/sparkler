@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import Home from "./pages/Home.jsx";
 import Gallery from "./pages/Gallery.jsx";
+import About from "./pages/About.jsx";
 import Viewer from "./pages/Viewer.jsx";
 import Embed from "./pages/Embed.jsx";
 import CliLogin from "./pages/CliLogin.jsx";
@@ -61,6 +62,7 @@ export default function App() {
               Sparkler
             </Link>
             <Link to="/gallery">Gallary</Link>
+            <Link to="/about">About</Link>
             {accountStatus?.isAdmin ? <Link to="/admin/access">Admin</Link> : null}
           </nav>
           <AuthChrome />
@@ -69,6 +71,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/gallery" element={<Gallery />} />
+        <Route path="/about" element={<About />} />
         <Route path="/s/:sceneId" element={<Viewer />} />
         <Route path="/embed/:sceneId" element={<Embed />} />
         <Route path="/cli-login" element={<CliLogin />} />

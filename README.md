@@ -7,8 +7,6 @@ Upload Gaussian splats from the command line and get a shareable web viewer.
 Run this in a new empty directory:
 
 ```bash
-mkdir sparkler-app
-cd sparkler-app
 curl -fsSL https://raw.githubusercontent.com/61cygni/sparkler/main/public/setup.sh -o setup.sh
 bash setup.sh
 ./bin/sparkler login
