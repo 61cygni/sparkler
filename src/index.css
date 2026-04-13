@@ -229,9 +229,8 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
-  font-size: 24px;
+  width: 42px;
+  height: 42px;
   line-height: 1;
   color: #fff;
   cursor: pointer;
@@ -239,6 +238,12 @@ code {
   border: 0;
   border-radius: 999px;
   backdrop-filter: blur(4px);
+}
+
+.viewer-button-icon {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
 }
 
 .viewer-button:hover {

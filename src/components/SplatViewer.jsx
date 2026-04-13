@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import GUI from "lil-gui";
+import {
+  CircleHelp,
+  Crosshair,
+  Ellipsis,
+  Share2,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { useAction, useMutation } from "convex/react";
 import * as THREE from "three";
@@ -1635,7 +1643,7 @@ export default function SplatViewer({
                 setShowHelpOverlay(true);
               }}
             >
-              ?
+              <CircleHelp className="viewer-button-icon" aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -1645,7 +1653,7 @@ export default function SplatViewer({
               title="Reset viewpoint"
               onClick={handleResetView}
             >
-              ⌖
+              <Crosshair className="viewer-button-icon" aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -1655,7 +1663,7 @@ export default function SplatViewer({
               title={shareLabel}
               onClick={() => void handleShareLink()}
             >
-              ↗
+              <Share2 className="viewer-button-icon" aria-hidden="true" />
             </button>
             {hasSceneAudio ? (
               <button
@@ -1666,7 +1674,11 @@ export default function SplatViewer({
                 title={audioEnabled ? "Mute sound" : "Enable sound"}
                 onClick={() => void handleToggleAudio()}
               >
-                {audioEnabled ? "))" : "x)"}
+                {audioEnabled ? (
+                  <Volume2 className="viewer-button-icon" aria-hidden="true" />
+                ) : (
+                  <VolumeX className="viewer-button-icon" aria-hidden="true" />
+                )}
               </button>
             ) : null}
             {canEdit ? (
@@ -1681,7 +1693,7 @@ export default function SplatViewer({
                   setShowToolsOverlay(true);
                 }}
               >
-                ⋯
+                <Ellipsis className="viewer-button-icon" aria-hidden="true" />
               </button>
             ) : null}
           </div>

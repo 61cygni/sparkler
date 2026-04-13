@@ -24,6 +24,7 @@
     "@sparkjsdev/spark": "file:./vendor/spark",
     "convex": "^1.17.4",
     "lil-gui": "^0.21.0",
+    "lucide-react": "^1.8.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.1",
