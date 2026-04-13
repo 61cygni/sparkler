@@ -476,7 +476,7 @@ function fitCameraToSplat({ splatMesh, localFrame, camera, sceneId }) {
 }
 
 /**
- * @param {{ sceneId: string; splatUrl: string | null; needsSignedUrl: boolean; filename?: string; title?: string; minimal?: boolean; canEdit?: boolean; defaultView?: { position: number[]; target: number[]; quaternion?: number[] } | null }} props
+ * @param {{ sceneId: string; splatUrl: string | null; needsSignedUrl: boolean; filename?: string; title?: string; minimal?: boolean; canEdit?: boolean; defaultView?: { position: number[]; target: number[]; quaternion?: number[] } | null; sceneAudio?: { background?: { filename: string; contentType: string; byteSize: number; volume?: number; loop?: boolean } | null; positional?: Array<{ id: string; filename: string; contentType: string; byteSize: number; position: number[]; volume?: number; loop?: boolean; refDistance?: number; maxDistance?: number; rolloffFactor?: number }> } | null }} props
  */
 export default function SplatViewer({
   sceneId,
@@ -487,6 +487,7 @@ export default function SplatViewer({
   minimal = false,
   canEdit = false,
   defaultView = null,
+  sceneAudio = null,
 }) {
   const location = useLocation();
   const viewerOptions = useMemo(
@@ -505,26 +506,38 @@ export default function SplatViewer({
   const shareConfigRef = useRef(null);
   const renderCanvasRef = useRef(null);
   const renderSnapshotRef = useRef(null);
+  const playAudioRef = useRef(async () => false);
+  const stopAudioRef = useRef(() => {});
   const presignView = useAction(api.tigris.presignView);
+  const resolveSceneAudio = useAction(api.tigris.resolveSceneAudio);
   const presignThumbnailUpload = useAction(api.tigris.presignThumbnailUpload);
   const saveSceneThumbnail = useMutation(api.scenes.saveSceneThumbnail);
+  const updateSceneDefaultView = useMutation(api.scenes.updateSceneDefaultView);
   const [err, setErr] = useState("");
-  const [showHelpOverlay, setShowHelpOverlay] = useState(viewerOptions.showHelp);
+  const [showHelpOverlay, setShowHelpOverlay] = useState(viewerOptions.showHelp && !canEdit);
   const [showToolsOverlay, setShowToolsOverlay] = useState(false);
   const [mobileHelpMode, setMobileHelpMode] = useState(isMobileDevice());
   const [copyLabel, setCopyLabel] = useState("Copy view");
   const [shareLabel, setShareLabel] = useState("Share link");
+  const [shareToast, setShareToast] = useState("");
+  const [saveViewLabel, setSaveViewLabel] = useState("Set current view");
   const [thumbnailLabel, setThumbnailLabel] = useState("Capture thumbnail");
   const [thumbnailBusy, setThumbnailBusy] = useState(false);
+  const [saveViewBusy, setSaveViewBusy] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const [currentView, setCurrentView] = useState(null);
+  const hasSceneAudio = Boolean(sceneAudio?.background || sceneAudio?.positional?.length);
 
   useEffect(() => {
-    setShowHelpOverlay(viewerOptions.showHelp);
+    setShowHelpOverlay(viewerOptions.showHelp && !canEdit);
     setShowToolsOverlay(false);
     setMobileHelpMode(isMobileDevice());
     setShareLabel("Share link");
+    setShareToast("");
+    setSaveViewLabel("Set current view");
     startupPoseLoggedRef.current = false;
-  }, [sceneId, viewerOptions.showHelp]);
+    setAudioEnabled(false);
+  }, [sceneId, viewerOptions.showHelp, canEdit]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -536,6 +549,7 @@ export default function SplatViewer({
     (async () => {
       setErr("");
       let url = splatUrl;
+      let resolvedAudio = null;
       debugLog(sceneId, "effect start", {
         sceneId,
         filename,
@@ -561,6 +575,13 @@ export default function SplatViewer({
           cancelled,
         });
         return;
+      }
+      if (!minimal && hasSceneAudio) {
+        try {
+          resolvedAudio = await resolveSceneAudio({ sceneId });
+        } catch (e) {
+          console.error(`[SplatViewer:${sceneId}] failed to resolve audio urls`, e);
+        }
       }
 
       const rect = el.getBoundingClientRect();
@@ -629,6 +650,86 @@ export default function SplatViewer({
       localFrame.quaternion.copy(camera.quaternion);
       camera.rotation.set(0, 0, 0);
       localFrame.add(camera);
+      let audioListener = null;
+      let backgroundAudio = null;
+      const positionalAudioNodes = [];
+
+      if (resolvedAudio?.background || resolvedAudio?.positional?.length) {
+        try {
+          if (resolvedAudio.positional?.length) {
+            audioListener = new THREE.AudioListener();
+            camera.add(audioListener);
+            const loader = new THREE.AudioLoader();
+            for (const item of resolvedAudio.positional) {
+              const holder = new THREE.Object3D();
+              holder.position.set(...item.position.slice(0, 3));
+              const positionalAudio = new THREE.PositionalAudio(audioListener);
+              const buffer = await loader.loadAsync(item.url);
+              positionalAudio.setBuffer(buffer);
+              positionalAudio.setLoop(item.loop ?? true);
+              positionalAudio.setVolume(item.volume ?? 1);
+              positionalAudio.setRefDistance(item.refDistance ?? 1);
+              positionalAudio.setMaxDistance(item.maxDistance ?? 100);
+              positionalAudio.setRolloffFactor(item.rolloffFactor ?? 1);
+              holder.add(positionalAudio);
+              scene.add(holder);
+              positionalAudioNodes.push({ holder, audio: positionalAudio });
+            }
+          }
+          if (resolvedAudio.background?.url) {
+            backgroundAudio = new Audio(resolvedAudio.background.url);
+            backgroundAudio.preload = "auto";
+            backgroundAudio.loop = resolvedAudio.background.loop ?? true;
+            backgroundAudio.volume = resolvedAudio.background.volume ?? 1;
+            backgroundAudio.crossOrigin = "anonymous";
+            backgroundAudio.playsInline = true;
+          }
+        } catch (error) {
+          console.error(`[SplatViewer:${sceneId}] failed to initialize audio`, error);
+          if (audioListener) {
+            camera.remove(audioListener);
+            audioListener = null;
+          }
+          if (backgroundAudio) {
+            backgroundAudio.pause();
+            backgroundAudio = null;
+          }
+          for (const item of positionalAudioNodes) {
+            item.holder.remove(item.audio);
+            scene.remove(item.holder);
+          }
+          positionalAudioNodes.length = 0;
+        }
+      }
+
+      playAudioRef.current = async () => {
+        let started = false;
+        if (audioListener?.context?.state === "suspended") {
+          await audioListener.context.resume();
+        }
+        for (const item of positionalAudioNodes) {
+          if (item.audio.buffer && !item.audio.isPlaying) {
+            item.audio.play();
+            started = true;
+          }
+        }
+        if (backgroundAudio) {
+          await backgroundAudio.play();
+          started = true;
+        }
+        return started;
+      };
+      stopAudioRef.current = () => {
+        if (backgroundAudio) {
+          backgroundAudio.pause();
+          backgroundAudio.currentTime = 0;
+        }
+        for (const item of positionalAudioNodes) {
+          if (item.audio.isPlaying) {
+            item.audio.stop();
+          }
+        }
+      };
 
       const controls = new SparkControls({ canvas: renderer.domElement });
       controls.fpsMovement.enable = true;
@@ -1256,6 +1357,24 @@ export default function SplatViewer({
         resetPoseRef.current = null;
         resetViewRef.current = () => {};
         shareConfigRef.current = null;
+        stopAudioRef.current();
+        playAudioRef.current = async () => false;
+        stopAudioRef.current = () => {};
+        if (backgroundAudio) {
+          backgroundAudio.pause();
+          backgroundAudio.src = "";
+          backgroundAudio = null;
+        }
+        for (const item of positionalAudioNodes) {
+          if (item.audio.isPlaying) {
+            item.audio.stop();
+          }
+          item.holder.remove(item.audio);
+          scene.remove(item.holder);
+        }
+        if (audioListener) {
+          camera.remove(audioListener);
+        }
         gui?.destroy();
         renderer.dispose();
         if (renderer.domElement.parentNode === el) el.removeChild(renderer.domElement);
@@ -1273,6 +1392,8 @@ export default function SplatViewer({
       resetPoseRef.current = null;
       resetViewRef.current = () => {};
       shareConfigRef.current = null;
+      playAudioRef.current = async () => false;
+      stopAudioRef.current = () => {};
       cleanup.fn?.();
     };
   }, [
@@ -1280,10 +1401,12 @@ export default function SplatViewer({
     splatUrl,
     needsSignedUrl,
     presignView,
+    resolveSceneAudio,
     filename,
     minimal,
     defaultView,
     canEdit,
+    hasSceneAudio,
     viewerOptions,
     savedDefaultPose,
     location.pathname,
@@ -1373,10 +1496,15 @@ export default function SplatViewer({
     try {
       await navigator.clipboard.writeText(shareUrl);
       setShareLabel("Copied link");
+      setShareToast("Share link copied");
     } catch {
       setShareLabel("Copy failed");
+      setShareToast("Failed to copy link");
     }
-    window.setTimeout(() => setShareLabel("Share link"), 1400);
+    window.setTimeout(() => {
+      setShareLabel("Share link");
+      setShareToast("");
+    }, 1400);
   }
 
   async function handleCaptureThumbnail() {
@@ -1427,8 +1555,68 @@ export default function SplatViewer({
     }
   }
 
+  async function handleSaveCurrentView() {
+    if (!canEdit || saveViewBusy) {
+      return;
+    }
+    const payload = latestExactViewRef.current;
+    if (!payload) {
+      setSaveViewLabel("No view yet");
+      window.setTimeout(() => setSaveViewLabel("Set current view"), 1400);
+      return;
+    }
+
+    setSaveViewBusy(true);
+    setSaveViewLabel("Saving...");
+    try {
+      await updateSceneDefaultView({
+        sceneId,
+        defaultView: {
+          position: payload.position,
+          target: payload.target,
+          quaternion: payload.quaternion,
+        },
+      });
+      resetPoseRef.current = payload;
+      setSaveViewLabel("Saved view");
+    } catch (error) {
+      console.error(`[SplatViewer:${sceneId}] failed to save current view`, error);
+      setSaveViewLabel("Save failed");
+    } finally {
+      setSaveViewBusy(false);
+      window.setTimeout(() => setSaveViewLabel("Set current view"), 1600);
+    }
+  }
+
   function handleResetView() {
     resetViewRef.current();
+  }
+
+  async function handleToggleAudio() {
+    if (!hasSceneAudio) {
+      return;
+    }
+    if (audioEnabled) {
+      stopAudioRef.current();
+      setAudioEnabled(false);
+      setShareToast("Sound off");
+      window.setTimeout(() => setShareToast(""), 1200);
+      return;
+    }
+    try {
+      const started = await playAudioRef.current();
+      if (!started) {
+        setShareToast("Audio unavailable");
+        window.setTimeout(() => setShareToast(""), 1400);
+        return;
+      }
+      setAudioEnabled(true);
+      setShareToast("Sound on");
+    } catch (error) {
+      console.error(`[SplatViewer:${sceneId}] failed to start audio`, error);
+      setShareToast("Audio blocked");
+    }
+    window.setTimeout(() => setShareToast(""), 1400);
   }
 
   return (
@@ -1439,6 +1627,8 @@ export default function SplatViewer({
             <button
               type="button"
               className="viewer-button"
+              aria-label="Show controls help"
+              data-tooltip="Help"
               title="Help"
               onClick={() => {
                 setShowToolsOverlay(false);
@@ -1450,6 +1640,8 @@ export default function SplatViewer({
             <button
               type="button"
               className="viewer-button"
+              aria-label="Reset viewpoint"
+              data-tooltip="Reset viewpoint"
               title="Reset viewpoint"
               onClick={handleResetView}
             >
@@ -1458,15 +1650,31 @@ export default function SplatViewer({
             <button
               type="button"
               className="viewer-button"
+              aria-label={shareLabel}
+              data-tooltip={shareLabel}
               title={shareLabel}
               onClick={() => void handleShareLink()}
             >
               ↗
             </button>
+            {hasSceneAudio ? (
+              <button
+                type="button"
+                className="viewer-button"
+                aria-label={audioEnabled ? "Mute sound" : "Enable sound"}
+                data-tooltip={audioEnabled ? "Mute sound" : "Enable sound"}
+                title={audioEnabled ? "Mute sound" : "Enable sound"}
+                onClick={() => void handleToggleAudio()}
+              >
+                {audioEnabled ? "))" : "x)"}
+              </button>
+            ) : null}
             {canEdit ? (
               <button
                 type="button"
                 className="viewer-button"
+                aria-label="Open owner tools"
+                data-tooltip="Owner tools"
                 title="Owner tools"
                 onClick={() => {
                   setShowHelpOverlay(false);
@@ -1477,6 +1685,7 @@ export default function SplatViewer({
               </button>
             ) : null}
           </div>
+          {shareToast ? <div className="viewer-toast">{shareToast}</div> : null}
           {displayLabel ? <div className="viewer-label">{displayLabel}</div> : null}
           {showHelpOverlay ? (
             <div
@@ -1559,6 +1768,14 @@ export default function SplatViewer({
                 <div className="viewer-tools-actions">
                   <button type="button" className="viewer-tools-button" onClick={() => void handleCopyView()}>
                     {copyLabel}
+                  </button>
+                  <button
+                    type="button"
+                    className="viewer-tools-button"
+                    onClick={() => void handleSaveCurrentView()}
+                    disabled={saveViewBusy}
+                  >
+                    {saveViewLabel}
                   </button>
                   <button
                     type="button"

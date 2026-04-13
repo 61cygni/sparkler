@@ -62,6 +62,17 @@ async function deleteSceneForOwner(
       new DeleteObjectCommand({ Bucket: bucket, Key: scene.thumbnail.storageKey }),
     );
   }
+  if (scene.audio?.background?.storageKey) {
+    await client.send(
+      new DeleteObjectCommand({ Bucket: bucket, Key: scene.audio.background.storageKey }),
+    );
+  }
+  for (const item of scene.audio?.positional ?? []) {
+    if (!item.storageKey) {
+      continue;
+    }
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: item.storageKey }));
+  }
 
   await ctx.runMutation(internal.scenes.removeSceneDocument, {
     sceneId,

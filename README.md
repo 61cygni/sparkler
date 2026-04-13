@@ -30,6 +30,9 @@ Delete the folder and the local Sparkler install is gone too.
 ./bin/sparkler host ./myscan.spz
 ./bin/sparkler list --verbose
 ./bin/sparkler view <sceneId>
+./bin/sparkler audio list <sceneId>
+./bin/sparkler audio add-background <sceneId> ./music.mp3
+./bin/sparkler audio add-positional <sceneId> ./speaker.ogg --position 0,1.5,-2
 ./bin/sparkler embed-snippet <sceneId>
 ./bin/sparkler del <sceneId>
 ```
@@ -39,6 +42,10 @@ Delete the folder and the local Sparkler install is gone too.
 - `sparkler login` opens the browser and saves your CLI session locally.
 - `sparkler logout` removes the local CLI token and signs out the browser session when possible.
 - `sparkler view <sceneId>` opens the hosted scene page in your browser.
+- `sparkler audio add-background` replaces the scene's single looping background track.
+- `sparkler audio add-positional` adds a spatial audio source at a world position.
+- `sparkler audio set <sceneId> background|<audioId>` updates volume, loop, and positional settings.
+- `sparkler audio remove <sceneId> background|<audioId>` removes a background or positional track.
 - `sparkler embed-snippet <sceneId>` prints iframe embed HTML.
 - If your account is pending approval, uploads and scene-management commands will stay blocked until an admin approves you.
 

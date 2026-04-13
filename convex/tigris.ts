@@ -41,6 +41,34 @@ function thumbnailStorageKey(sceneId: Id<"scenes">): string {
   return `thumbnails/${sceneId}.jpg`;
 }
 
+function audioStorageKey(
+  sceneId: Id<"scenes">,
+  kind: "background" | "positional",
+  filename: string,
+  audioId?: string,
+) {
+  const base = filename.split(/[/\\]/).pop() ?? filename;
+  const dot = base.lastIndexOf(".");
+  const ext = dot >= 0 ? base.slice(dot + 1).toLowerCase() : "bin";
+  if (kind === "background") {
+    return `audio/${sceneId}/background.${ext}`;
+  }
+  return `audio/${sceneId}/positional/${audioId ?? crypto.randomUUID()}.${ext}`;
+}
+
+function validateAudioUpload(filename: string, byteSize: number | undefined) {
+  const base = filename.split(/[/\\]/).pop() ?? filename;
+  const dot = base.lastIndexOf(".");
+  const ext = dot >= 0 ? base.slice(dot + 1).toLowerCase() : null;
+  if (!ext || !["mp3", "wav", "ogg"].includes(ext)) {
+    throw new Error("Audio must be .mp3, .wav, or .ogg");
+  }
+  const maxBytes = Number(process.env.SPARKLER_MAX_AUDIO_BYTES ?? 52_428_800);
+  if (byteSize !== undefined && byteSize > maxBytes) {
+    throw new Error(`Audio file too large (max ${maxBytes} bytes).`);
+  }
+}
+
 export const presignUpload = action({
   args: {
     sceneId: v.id("scenes"),
@@ -170,6 +198,63 @@ export const presignThumbnailUpload = action({
   Promise<{ url: string; headers: { "Content-Type": string } }>
 >;
 
+export const presignAudioUpload = action({
+  args: {
+    sceneId: v.id("scenes"),
+    filename: v.string(),
+    kind: v.union(v.literal("background"), v.literal("positional")),
+    audioId: v.optional(v.string()),
+    contentType: v.optional(v.string()),
+    byteSize: v.optional(v.number()),
+  },
+  handler: async (
+    ctx: ActionCtx,
+    args: {
+      sceneId: Id<"scenes">;
+      filename: string;
+      kind: "background" | "positional";
+      audioId?: string;
+      contentType?: string;
+      byteSize?: number;
+    },
+  ) => {
+    const subject = await requireApprovedViewerSubjectAction(ctx);
+    const scene = await ctx.runQuery(internal.sceneInternals.get, {
+      sceneId: args.sceneId,
+    });
+    if (!scene) {
+      throw new Error("Scene not found");
+    }
+    if (scene.ownerSubject !== subject) {
+      throw new Error("Forbidden");
+    }
+    validateAudioUpload(args.filename, args.byteSize);
+
+    const { bucket } = requireTigrisEnv();
+    const client = s3Client();
+    const contentType = args.contentType ?? "application/octet-stream";
+    const storageKey = audioStorageKey(args.sceneId, args.kind, args.filename, args.audioId);
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: storageKey,
+      ContentType: contentType,
+    });
+    const url = await getSignedUrl(client, command, { expiresIn: 900 });
+    return { url, headers: { "Content-Type": contentType }, storageKey };
+  },
+} as never) as RegisteredAction<
+  "public",
+  {
+    sceneId: Id<"scenes">;
+    filename: string;
+    kind: "background" | "positional";
+    audioId?: string;
+    contentType?: string;
+    byteSize?: number;
+  },
+  Promise<{ url: string; headers: { "Content-Type": string }; storageKey: string }>
+>;
+
 export const presignThumbnailUrls = action({
   args: {
     sceneIds: v.array(v.id("scenes")),
@@ -240,4 +325,101 @@ export const verifyObject = action({
   "public",
   { sceneId: import("./_generated/dataModel").Id<"scenes"> },
   Promise<{ ok: true }>
+>;
+
+export const resolveSceneAudio = action({
+  args: { sceneId: v.id("scenes") },
+  handler: async (ctx: ActionCtx, args: { sceneId: Id<"scenes"> }) => {
+    const scene = await ctx.runQuery(internal.sceneInternals.get, {
+      sceneId: args.sceneId,
+    });
+    if (!scene) {
+      throw new Error("Scene not found");
+    }
+    if (scene.visibility === "private") {
+      const subject = await requireViewerSubjectAction(ctx);
+      if (scene.ownerSubject !== subject) {
+        throw new Error("Forbidden");
+      }
+    }
+
+    const background = scene.audio?.background ?? null;
+    const positional = scene.audio?.positional ?? [];
+    if (!background && positional.length === 0) {
+      return null;
+    }
+
+    const publicBase = process.env.TIGRIS_PUBLIC_BASE_URL?.replace(/\/$/, "");
+    const usePublic =
+      Boolean(publicBase) &&
+      (scene.visibility === "public" || scene.visibility === "unlisted");
+
+    if (usePublic && publicBase) {
+      return {
+        background: background ? { ...background, url: `${publicBase}/${background.storageKey}` } : null,
+        positional: positional.map((item) => ({
+          ...item,
+          url: `${publicBase}/${item.storageKey}`,
+        })),
+      };
+    }
+
+    const { bucket } = requireTigrisEnv();
+    const client = s3Client();
+    const backgroundUrl = background
+      ? await getSignedUrl(
+          client,
+          new GetObjectCommand({ Bucket: bucket, Key: background.storageKey }),
+          { expiresIn: 3600 },
+        )
+      : null;
+    const positionalUrls = await Promise.all(
+      positional.map(async (item) => ({
+        ...item,
+        url: await getSignedUrl(
+          client,
+          new GetObjectCommand({ Bucket: bucket, Key: item.storageKey }),
+          { expiresIn: 3600 },
+        ),
+      })),
+    );
+
+    return {
+      background: background ? { ...background, url: backgroundUrl } : null,
+      positional: positionalUrls,
+    };
+  },
+} as never) as RegisteredAction<
+  "public",
+  { sceneId: Id<"scenes"> },
+  Promise<
+    | null
+    | {
+        background:
+          | null
+          | {
+              storageKey: string;
+              filename: string;
+              contentType: string;
+              byteSize: number;
+              volume?: number;
+              loop?: boolean;
+              url: string;
+            };
+        positional: Array<{
+          id: string;
+          storageKey: string;
+          filename: string;
+          contentType: string;
+          byteSize: number;
+          position: number[];
+          volume?: number;
+          loop?: boolean;
+          refDistance?: number;
+          maxDistance?: number;
+          rolloffFactor?: number;
+          url: string;
+        }>;
+      }
+  >
 >;

@@ -58,6 +58,37 @@ export default defineSchema({
         updatedAt: v.number(),
       }),
     ),
+    audio: v.optional(
+      v.object({
+        background: v.optional(
+          v.object({
+            storageKey: v.string(),
+            filename: v.string(),
+            contentType: v.string(),
+            byteSize: v.number(),
+            volume: v.optional(v.number()),
+            loop: v.optional(v.boolean()),
+          }),
+        ),
+        positional: v.optional(
+          v.array(
+            v.object({
+              id: v.string(),
+              storageKey: v.string(),
+              filename: v.string(),
+              contentType: v.string(),
+              byteSize: v.number(),
+              position: v.array(v.number()),
+              volume: v.optional(v.number()),
+              loop: v.optional(v.boolean()),
+              refDistance: v.optional(v.number()),
+              maxDistance: v.optional(v.number()),
+              rolloffFactor: v.optional(v.number()),
+            }),
+          ),
+        ),
+      }),
+    ),
     createdAt: v.number(),
   })
     .index("by_owner_created", ["ownerSubject", "createdAt"])

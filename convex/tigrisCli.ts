@@ -31,6 +31,34 @@ function s3Client() {
   });
 }
 
+function audioStorageKey(
+  sceneId: Id<"scenes">,
+  kind: "background" | "positional",
+  filename: string,
+  audioId?: string,
+) {
+  const base = filename.split(/[/\\]/).pop() ?? filename;
+  const dot = base.lastIndexOf(".");
+  const ext = dot >= 0 ? base.slice(dot + 1).toLowerCase() : "bin";
+  if (kind === "background") {
+    return `audio/${sceneId}/background.${ext}`;
+  }
+  return `audio/${sceneId}/positional/${audioId ?? crypto.randomUUID()}.${ext}`;
+}
+
+function validateAudioUpload(filename: string, byteSize: number | undefined) {
+  const base = filename.split(/[/\\]/).pop() ?? filename;
+  const dot = base.lastIndexOf(".");
+  const ext = dot >= 0 ? base.slice(dot + 1).toLowerCase() : null;
+  if (!ext || !["mp3", "wav", "ogg"].includes(ext)) {
+    throw new Error("Audio must be .mp3, .wav, or .ogg");
+  }
+  const maxBytes = Number(process.env.SPARKLER_MAX_AUDIO_BYTES ?? 52_428_800);
+  if (byteSize !== undefined && byteSize > maxBytes) {
+    throw new Error(`Audio file too large (max ${maxBytes} bytes).`);
+  }
+}
+
 /** Presign PUT for CLI HTTP flow (Bearer SPARKLER_CLI_SECRET). */
 export const presignUploadForCli = internalAction({
   args: {
@@ -125,5 +153,101 @@ export const presignUploadForOwner = internalAction({
 
     const url = await getSignedUrl(client, command, { expiresIn: 900 });
     return { url, headers: { "Content-Type": contentType } };
+  },
+} as never);
+
+export const presignAudioUploadForCli = internalAction({
+  args: {
+    sceneId: v.id("scenes"),
+    filename: v.string(),
+    kind: v.union(v.literal("background"), v.literal("positional")),
+    audioId: v.optional(v.string()),
+    contentType: v.optional(v.string()),
+    byteSize: v.optional(v.number()),
+  },
+  handler: async (
+    ctx: ActionCtx,
+    args: {
+      sceneId: Id<"scenes">;
+      filename: string;
+      kind: "background" | "positional";
+      audioId?: string;
+      contentType?: string;
+      byteSize?: number;
+    },
+  ) => {
+    const owner = process.env.SPARKLER_CLI_OWNER_SUBJECT?.trim();
+    if (!owner) {
+      throw new Error("SPARKLER_CLI_OWNER_SUBJECT not set");
+    }
+    const scene = await ctx.runQuery(internal.sceneInternals.get, {
+      sceneId: args.sceneId,
+    });
+    if (!scene) {
+      throw new Error("Scene not found");
+    }
+    if (scene.ownerSubject !== owner) {
+      throw new Error("Forbidden");
+    }
+    validateAudioUpload(args.filename, args.byteSize);
+
+    const { bucket } = requireTigrisEnv();
+    const client = s3Client();
+    const contentType = args.contentType ?? "application/octet-stream";
+    const storageKey = audioStorageKey(args.sceneId, args.kind, args.filename, args.audioId);
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: storageKey,
+      ContentType: contentType,
+    });
+    const url = await getSignedUrl(client, command, { expiresIn: 900 });
+    return { url, headers: { "Content-Type": contentType }, storageKey };
+  },
+} as never);
+
+export const presignAudioUploadForOwner = internalAction({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    filename: v.string(),
+    kind: v.union(v.literal("background"), v.literal("positional")),
+    audioId: v.optional(v.string()),
+    contentType: v.optional(v.string()),
+    byteSize: v.optional(v.number()),
+  },
+  handler: async (
+    ctx: ActionCtx,
+    args: {
+      ownerSubject: string;
+      sceneId: Id<"scenes">;
+      filename: string;
+      kind: "background" | "positional";
+      audioId?: string;
+      contentType?: string;
+      byteSize?: number;
+    },
+  ) => {
+    const scene = await ctx.runQuery(internal.sceneInternals.get, {
+      sceneId: args.sceneId,
+    });
+    if (!scene) {
+      throw new Error("Scene not found");
+    }
+    if (scene.ownerSubject !== args.ownerSubject) {
+      throw new Error("Forbidden");
+    }
+    validateAudioUpload(args.filename, args.byteSize);
+
+    const { bucket } = requireTigrisEnv();
+    const client = s3Client();
+    const contentType = args.contentType ?? "application/octet-stream";
+    const storageKey = audioStorageKey(args.sceneId, args.kind, args.filename, args.audioId);
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: storageKey,
+      ContentType: contentType,
+    });
+    const url = await getSignedUrl(client, command, { expiresIn: 900 });
+    return { url, headers: { "Content-Type": contentType }, storageKey };
   },
 } as never);

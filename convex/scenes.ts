@@ -19,6 +19,38 @@ const defaultViewValidator = v.object({
   quaternion: v.optional(v.array(v.number())),
 });
 
+const backgroundAudioValidator = v.object({
+  storageKey: v.string(),
+  filename: v.string(),
+  contentType: v.string(),
+  byteSize: v.number(),
+  volume: v.optional(v.number()),
+  loop: v.optional(v.boolean()),
+});
+
+const positionalAudioValidator = v.object({
+  id: v.string(),
+  storageKey: v.string(),
+  filename: v.string(),
+  contentType: v.string(),
+  byteSize: v.number(),
+  position: v.array(v.number()),
+  volume: v.optional(v.number()),
+  loop: v.optional(v.boolean()),
+  refDistance: v.optional(v.number()),
+  maxDistance: v.optional(v.number()),
+  rolloffFactor: v.optional(v.number()),
+});
+
+const positionalAudioPatchValidator = v.object({
+  position: v.optional(v.array(v.number())),
+  volume: v.optional(v.number()),
+  loop: v.optional(v.boolean()),
+  refDistance: v.optional(v.number()),
+  maxDistance: v.optional(v.number()),
+  rolloffFactor: v.optional(v.number()),
+});
+
 const visibilityValidator = v.union(
   v.literal("public"),
   v.literal("unlisted"),
@@ -34,6 +66,9 @@ const ALLOWED_EXT = new Set([
   "sog",
   "rad",
 ]);
+
+const ALLOWED_AUDIO_EXT = new Set(["mp3", "wav", "ogg"]);
+const MAX_POSITIONAL_AUDIO = 16;
 
 function extensionFromFilename(name: string): string | null {
   const base = name.split(/[/\\]/).pop() ?? name;
@@ -60,6 +95,110 @@ function demoOwnerSubject(): string {
 
 function thumbnailStorageKey(sceneId: Id<"scenes">): string {
   return `thumbnails/${sceneId}.jpg`;
+}
+
+function currentSceneAudio(scene: {
+  audio?: {
+    background?: {
+      storageKey: string;
+      filename: string;
+      contentType: string;
+      byteSize: number;
+      volume?: number;
+      loop?: boolean;
+    };
+    positional?: Array<{
+      id: string;
+      storageKey: string;
+      filename: string;
+      contentType: string;
+      byteSize: number;
+      position: number[];
+      volume?: number;
+      loop?: boolean;
+      refDistance?: number;
+      maxDistance?: number;
+      rolloffFactor?: number;
+    }>;
+  };
+}) {
+  return {
+    background: scene.audio?.background ?? null,
+    positional: scene.audio?.positional ?? [],
+  };
+}
+
+function sceneAudioPayload(scene: {
+  audio?: {
+    background?: {
+      storageKey: string;
+      filename: string;
+      contentType: string;
+      byteSize: number;
+      volume?: number;
+      loop?: boolean;
+    };
+    positional?: Array<{
+      id: string;
+      storageKey: string;
+      filename: string;
+      contentType: string;
+      byteSize: number;
+      position: number[];
+      volume?: number;
+      loop?: boolean;
+      refDistance?: number;
+      maxDistance?: number;
+      rolloffFactor?: number;
+    }>;
+  };
+}) {
+  const audio = currentSceneAudio(scene);
+  return audio.background || audio.positional.length
+    ? {
+        background: audio.background,
+        positional: audio.positional,
+      }
+    : null;
+}
+
+function validateAudioFile(filename: string, byteSize: number | undefined) {
+  const ext = extensionFromFilename(filename);
+  if (!ext || !ALLOWED_AUDIO_EXT.has(ext)) {
+    throw new Error(
+      `Unsupported audio file type (.${ext ?? "none"}). Allowed: ${[...ALLOWED_AUDIO_EXT].join(", ")}`,
+    );
+  }
+  const maxBytes = Number(process.env.SPARKLER_MAX_AUDIO_BYTES ?? 52_428_800);
+  if (byteSize !== undefined && byteSize > maxBytes) {
+    throw new Error(`Audio file too large (max ${maxBytes} bytes).`);
+  }
+}
+
+async function patchSceneAudioForOwner(
+  ctx: MutationCtx,
+  sceneId: Id<"scenes">,
+  ownerSubject: string,
+  update: (audio: ReturnType<typeof currentSceneAudio>) => {
+    background: ReturnType<typeof currentSceneAudio>["background"];
+    positional: ReturnType<typeof currentSceneAudio>["positional"];
+  },
+) {
+  const scene = await ctx.db.get(sceneId);
+  if (!scene || scene.ownerSubject !== ownerSubject) {
+    throw new Error("Forbidden");
+  }
+  const nextAudio = update(currentSceneAudio(scene));
+  await ctx.db.patch(sceneId, {
+    audio:
+      nextAudio.background || nextAudio.positional.length
+        ? {
+            ...(nextAudio.background ? { background: nextAudio.background } : {}),
+            ...(nextAudio.positional.length ? { positional: nextAudio.positional } : {}),
+          }
+        : undefined,
+  });
+  return null;
 }
 
 async function updateSceneVisibilityForOwner(
@@ -249,6 +388,7 @@ export const getScene = query({
       storageKey: scene.storageKey,
       createdAt: scene.createdAt,
       defaultView: scene.defaultView ?? null,
+      audio: sceneAudioPayload(scene),
       isOwner,
       thumbnail: thumbnailAccess.thumbnail,
       thumbnailUrl: thumbnailAccess.thumbnailUrl,
@@ -410,6 +550,103 @@ export const updateSceneDefaultView = mutation({
       defaultView: args.defaultView,
     });
     return null;
+  },
+});
+
+export const setBackgroundAudio = mutation({
+  args: {
+    sceneId: v.id("scenes"),
+    audio: backgroundAudioValidator,
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
+    validateAudioFile(args.audio.filename, args.audio.byteSize);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, ownerSubject, (audio) => ({
+      ...audio,
+      background: args.audio,
+    }));
+  },
+});
+
+export const removeBackgroundAudio = mutation({
+  args: { sceneId: v.id("scenes") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, ownerSubject, (audio) => ({
+      ...audio,
+      background: null,
+    }));
+  },
+});
+
+export const addPositionalAudio = mutation({
+  args: {
+    sceneId: v.id("scenes"),
+    audio: positionalAudioValidator,
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
+    validateAudioFile(args.audio.filename, args.audio.byteSize);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, ownerSubject, (audio) => {
+      if (audio.positional.length >= MAX_POSITIONAL_AUDIO) {
+        throw new Error(`Scenes support at most ${MAX_POSITIONAL_AUDIO} positional audio sources.`);
+      }
+      if (audio.positional.some((item) => item.id === args.audio.id)) {
+        throw new Error(`Positional audio id already exists: ${args.audio.id}`);
+      }
+      return {
+        ...audio,
+        positional: [...audio.positional, args.audio],
+      };
+    });
+  },
+});
+
+export const updatePositionalAudio = mutation({
+  args: {
+    sceneId: v.id("scenes"),
+    audioId: v.string(),
+    patch: positionalAudioPatchValidator,
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, ownerSubject, (audio) => {
+      const positional = audio.positional.map((item) =>
+        item.id === args.audioId ? { ...item, ...args.patch } : item,
+      );
+      if (!positional.some((item) => item.id === args.audioId)) {
+        throw new Error(`Positional audio not found: ${args.audioId}`);
+      }
+      return {
+        ...audio,
+        positional,
+      };
+    });
+  },
+});
+
+export const removePositionalAudio = mutation({
+  args: {
+    sceneId: v.id("scenes"),
+    audioId: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const ownerSubject = await requireApprovedViewerSubject(ctx);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, ownerSubject, (audio) => {
+      const positional = audio.positional.filter((item) => item.id !== args.audioId);
+      if (positional.length === audio.positional.length) {
+        throw new Error(`Positional audio not found: ${args.audioId}`);
+      }
+      return {
+        ...audio,
+        positional,
+      };
+    });
   },
 });
 
@@ -621,6 +858,187 @@ export const updateDefaultViewForOwner = internalMutation({
       defaultView: args.defaultView,
     });
     return null;
+  },
+});
+
+export const setBackgroundAudioForCli = internalMutation({
+  args: {
+    sceneId: v.id("scenes"),
+    audio: backgroundAudioValidator,
+  },
+  handler: async (ctx, args) => {
+    validateAudioFile(args.audio.filename, args.audio.byteSize);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, cliOwnerSubject(), (audio) => ({
+      ...audio,
+      background: args.audio,
+    }));
+  },
+});
+
+export const setBackgroundAudioForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    audio: backgroundAudioValidator,
+  },
+  handler: async (ctx, args) => {
+    validateAudioFile(args.audio.filename, args.audio.byteSize);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, args.ownerSubject, (audio) => ({
+      ...audio,
+      background: args.audio,
+    }));
+  },
+});
+
+export const removeBackgroundAudioForCli = internalMutation({
+  args: { sceneId: v.id("scenes") },
+  handler: async (ctx, args) => {
+    return await patchSceneAudioForOwner(ctx, args.sceneId, cliOwnerSubject(), (audio) => ({
+      ...audio,
+      background: null,
+    }));
+  },
+});
+
+export const removeBackgroundAudioForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+  },
+  handler: async (ctx, args) => {
+    return await patchSceneAudioForOwner(ctx, args.sceneId, args.ownerSubject, (audio) => ({
+      ...audio,
+      background: null,
+    }));
+  },
+});
+
+export const addPositionalAudioForCli = internalMutation({
+  args: {
+    sceneId: v.id("scenes"),
+    audio: positionalAudioValidator,
+  },
+  handler: async (ctx, args) => {
+    validateAudioFile(args.audio.filename, args.audio.byteSize);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, cliOwnerSubject(), (audio) => {
+      if (audio.positional.length >= MAX_POSITIONAL_AUDIO) {
+        throw new Error(`Scenes support at most ${MAX_POSITIONAL_AUDIO} positional audio sources.`);
+      }
+      if (audio.positional.some((item) => item.id === args.audio.id)) {
+        throw new Error(`Positional audio id already exists: ${args.audio.id}`);
+      }
+      return {
+        ...audio,
+        positional: [...audio.positional, args.audio],
+      };
+    });
+  },
+});
+
+export const addPositionalAudioForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    audio: positionalAudioValidator,
+  },
+  handler: async (ctx, args) => {
+    validateAudioFile(args.audio.filename, args.audio.byteSize);
+    return await patchSceneAudioForOwner(ctx, args.sceneId, args.ownerSubject, (audio) => {
+      if (audio.positional.length >= MAX_POSITIONAL_AUDIO) {
+        throw new Error(`Scenes support at most ${MAX_POSITIONAL_AUDIO} positional audio sources.`);
+      }
+      if (audio.positional.some((item) => item.id === args.audio.id)) {
+        throw new Error(`Positional audio id already exists: ${args.audio.id}`);
+      }
+      return {
+        ...audio,
+        positional: [...audio.positional, args.audio],
+      };
+    });
+  },
+});
+
+export const updatePositionalAudioForCli = internalMutation({
+  args: {
+    sceneId: v.id("scenes"),
+    audioId: v.string(),
+    patch: positionalAudioPatchValidator,
+  },
+  handler: async (ctx, args) => {
+    return await patchSceneAudioForOwner(ctx, args.sceneId, cliOwnerSubject(), (audio) => {
+      const positional = audio.positional.map((item) =>
+        item.id === args.audioId ? { ...item, ...args.patch } : item,
+      );
+      if (!positional.some((item) => item.id === args.audioId)) {
+        throw new Error(`Positional audio not found: ${args.audioId}`);
+      }
+      return {
+        ...audio,
+        positional,
+      };
+    });
+  },
+});
+
+export const updatePositionalAudioForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    audioId: v.string(),
+    patch: positionalAudioPatchValidator,
+  },
+  handler: async (ctx, args) => {
+    return await patchSceneAudioForOwner(ctx, args.sceneId, args.ownerSubject, (audio) => {
+      const positional = audio.positional.map((item) =>
+        item.id === args.audioId ? { ...item, ...args.patch } : item,
+      );
+      if (!positional.some((item) => item.id === args.audioId)) {
+        throw new Error(`Positional audio not found: ${args.audioId}`);
+      }
+      return {
+        ...audio,
+        positional,
+      };
+    });
+  },
+});
+
+export const removePositionalAudioForCli = internalMutation({
+  args: {
+    sceneId: v.id("scenes"),
+    audioId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await patchSceneAudioForOwner(ctx, args.sceneId, cliOwnerSubject(), (audio) => {
+      const positional = audio.positional.filter((item) => item.id !== args.audioId);
+      if (positional.length === audio.positional.length) {
+        throw new Error(`Positional audio not found: ${args.audioId}`);
+      }
+      return {
+        ...audio,
+        positional,
+      };
+    });
+  },
+});
+
+export const removePositionalAudioForOwner = internalMutation({
+  args: {
+    ownerSubject: v.string(),
+    sceneId: v.id("scenes"),
+    audioId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await patchSceneAudioForOwner(ctx, args.sceneId, args.ownerSubject, (audio) => {
+      const positional = audio.positional.filter((item) => item.id !== args.audioId);
+      if (positional.length === audio.positional.length) {
+        throw new Error(`Positional audio not found: ${args.audioId}`);
+      }
+      return {
+        ...audio,
+        positional,
+      };
+    });
   },
 });
 

@@ -317,6 +317,69 @@ function parseViewPayload(opts) {
   };
 }
 
+function parseVectorArg(value, label) {
+  const parts = String(value ?? "")
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .slice(0, 3);
+  if (parts.length !== 3 || parts.some((item) => !Number.isFinite(item))) {
+    console.error(`${label} must be 3 comma-separated numbers, e.g. 0,1.5,-2`);
+    process.exit(1);
+  }
+  return parts;
+}
+
+function parseOptionalNumber(value, label) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    console.error(`${label} must be a number.`);
+    process.exit(1);
+  }
+  return parsed;
+}
+
+function normalizeAudioTarget(value) {
+  const target = String(value ?? "").trim();
+  if (!target) {
+    console.error("Audio target is required.");
+    process.exit(1);
+  }
+  return target;
+}
+
+function printAudioList(sceneId, audio, opts) {
+  const payload = {
+    sceneId,
+    background: audio.background ?? null,
+    positional: audio.positional ?? [],
+  };
+  if (opts.json) {
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+  if (payload.background) {
+    console.log(`background  ${payload.background.filename}`);
+    console.log(
+      `  volume=${payload.background.volume ?? 1} loop=${payload.background.loop ?? true}`,
+    );
+  } else {
+    console.log("background  (none)");
+  }
+  if (!payload.positional.length) {
+    console.log("positional  (none)");
+    return;
+  }
+  for (const item of payload.positional) {
+    console.log(`positional  ${item.id}  ${item.filename}`);
+    console.log(
+      `  pos=${item.position.join(",")} volume=${item.volume ?? 1} loop=${item.loop ?? true} refDistance=${item.refDistance ?? 1} maxDistance=${item.maxDistance ?? 100} rolloffFactor=${item.rolloffFactor ?? 1}`,
+    );
+  }
+}
+
 async function promptYesNo(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -546,6 +609,9 @@ const MIME = {
   ".ply": "application/octet-stream",
   ".splat": "application/octet-stream",
   ".ksplat": "application/octet-stream",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
 };
 
 function guessContentType(filename) {
@@ -1135,6 +1201,316 @@ async function cmdSetVisibility(sceneId, visibilityInput, opts) {
   }
 }
 
+async function fetchAudioState(auth, sceneId) {
+  if (auth.kind === "demo") {
+    const scene = await auth.client.query("scenes:getScene", { sceneId });
+    if (!scene) {
+      throw new Error("Scene not found or you do not have access.");
+    }
+    return {
+      background: scene.audio?.background ?? null,
+      positional: scene.audio?.positional ?? [],
+    };
+  }
+  return await fetchCli(
+    auth,
+    `audio?sceneId=${encodeURIComponent(sceneId)}`,
+    { method: "GET" },
+    "audio-list",
+  );
+}
+
+async function removeAudioTarget(auth, sceneId, target) {
+  const normalized = normalizeAudioTarget(target);
+  if (auth.kind === "demo") {
+    if (normalized === "background") {
+      await auth.client.mutation("scenes:removeBackgroundAudio", { sceneId });
+    } else {
+      await auth.client.mutation("scenes:removePositionalAudio", {
+        sceneId,
+        audioId: normalized,
+      });
+    }
+    return;
+  }
+  await fetchCli(
+    auth,
+    "audio/remove",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sceneId,
+        kind: normalized === "background" ? "background" : "positional",
+        ...(normalized === "background" ? {} : { audioId: normalized }),
+      }),
+    },
+    "audio-remove",
+  );
+}
+
+async function cmdAudioList(sceneId, opts) {
+  const config = loadConfig();
+  const auth = resolveSceneAuth(config, opts);
+  const audio = await fetchAudioState(auth, sceneId);
+  printAudioList(sceneId, audio, opts);
+}
+
+async function cmdAudioAddBackground(sceneId, filePath, opts) {
+  const config = loadConfig();
+  const abs = path.resolve(filePath);
+  if (!existsSync(abs)) {
+    console.error(`Not found: ${abs}`);
+    process.exit(1);
+  }
+  const stat = statSync(abs);
+  const filename = path.basename(abs);
+  const contentType = opts.contentType || guessContentType(filename);
+  const volume = parseOptionalNumber(opts.volume, "Volume");
+  const loop = opts.loop;
+  const auth = resolveSceneAuth(config, opts);
+
+  if (auth.kind === "demo") {
+    const presign = await auth.client.action("tigris:presignAudioUpload", {
+      sceneId,
+      filename,
+      kind: "background",
+      contentType,
+      byteSize: stat.size,
+    });
+    const putRes = await putFileStream(presign.url, presign.headers, abs);
+    if (!putRes.ok) {
+      console.error("PUT to storage failed:", putRes.status, await putRes.text());
+      process.exit(1);
+    }
+    await auth.client.mutation("scenes:setBackgroundAudio", {
+      sceneId,
+      audio: {
+        storageKey: presign.storageKey,
+        filename,
+        contentType,
+        byteSize: stat.size,
+        ...(volume !== undefined ? { volume } : {}),
+        ...(loop !== undefined ? { loop } : {}),
+      },
+    });
+  } else {
+    const session = await fetchCli(
+      auth,
+      "audio/background",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sceneId,
+          filename,
+          contentType,
+          byteSize: stat.size,
+          ...(volume !== undefined ? { volume } : {}),
+          ...(loop !== undefined ? { loop } : {}),
+        }),
+      },
+      "audio-background",
+    );
+    const putRes = await putFileStream(session.uploadUrl, session.headers, abs);
+    if (!putRes.ok) {
+      await removeAudioTarget(auth, sceneId, "background").catch(() => {});
+      console.error("PUT to storage failed:", putRes.status, await putRes.text());
+      process.exit(1);
+    }
+  }
+
+  const result = { ok: true, sceneId, kind: "background", filename };
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.log(`Attached background audio to ${sceneId}`);
+  }
+}
+
+async function cmdAudioAddPositional(sceneId, filePath, opts) {
+  const config = loadConfig();
+  const abs = path.resolve(filePath);
+  if (!existsSync(abs)) {
+    console.error(`Not found: ${abs}`);
+    process.exit(1);
+  }
+  const stat = statSync(abs);
+  const filename = path.basename(abs);
+  const contentType = opts.contentType || guessContentType(filename);
+  const position = parseVectorArg(opts.position, "Position");
+  const audioId = String(opts.id || crypto.randomUUID().slice(0, 8));
+  const volume = parseOptionalNumber(opts.volume, "Volume");
+  const refDistance = parseOptionalNumber(opts.refDistance, "refDistance");
+  const maxDistance = parseOptionalNumber(opts.maxDistance, "maxDistance");
+  const rolloffFactor = parseOptionalNumber(opts.rolloffFactor, "rolloffFactor");
+  const loop = opts.loop;
+  const auth = resolveSceneAuth(config, opts);
+
+  if (auth.kind === "demo") {
+    const presign = await auth.client.action("tigris:presignAudioUpload", {
+      sceneId,
+      filename,
+      kind: "positional",
+      audioId,
+      contentType,
+      byteSize: stat.size,
+    });
+    const putRes = await putFileStream(presign.url, presign.headers, abs);
+    if (!putRes.ok) {
+      console.error("PUT to storage failed:", putRes.status, await putRes.text());
+      process.exit(1);
+    }
+    await auth.client.mutation("scenes:addPositionalAudio", {
+      sceneId,
+      audio: {
+        id: audioId,
+        storageKey: presign.storageKey,
+        filename,
+        contentType,
+        byteSize: stat.size,
+        position,
+        ...(volume !== undefined ? { volume } : {}),
+        ...(loop !== undefined ? { loop } : {}),
+        ...(refDistance !== undefined ? { refDistance } : {}),
+        ...(maxDistance !== undefined ? { maxDistance } : {}),
+        ...(rolloffFactor !== undefined ? { rolloffFactor } : {}),
+      },
+    });
+  } else {
+    const session = await fetchCli(
+      auth,
+      "audio/positional",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sceneId,
+          filename,
+          audioId,
+          position,
+          contentType,
+          byteSize: stat.size,
+          ...(volume !== undefined ? { volume } : {}),
+          ...(loop !== undefined ? { loop } : {}),
+          ...(refDistance !== undefined ? { refDistance } : {}),
+          ...(maxDistance !== undefined ? { maxDistance } : {}),
+          ...(rolloffFactor !== undefined ? { rolloffFactor } : {}),
+        }),
+      },
+      "audio-positional",
+    );
+    const putRes = await putFileStream(session.uploadUrl, session.headers, abs);
+    if (!putRes.ok) {
+      await removeAudioTarget(auth, sceneId, audioId).catch(() => {});
+      console.error("PUT to storage failed:", putRes.status, await putRes.text());
+      process.exit(1);
+    }
+  }
+
+  const result = { ok: true, sceneId, kind: "positional", audioId, filename, position };
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.log(`Attached positional audio ${audioId} to ${sceneId}`);
+  }
+}
+
+async function cmdAudioSet(sceneId, target, opts) {
+  const config = loadConfig();
+  const auth = resolveSceneAuth(config, opts);
+  const volume = parseOptionalNumber(opts.volume, "Volume");
+  const loop = opts.loop;
+  const normalized = normalizeAudioTarget(target);
+
+  if (normalized === "background") {
+    if (auth.kind === "demo") {
+      const scene = await auth.client.query("scenes:getScene", { sceneId });
+      const background = scene?.audio?.background;
+      if (!background) {
+        throw new Error("Background audio not found.");
+      }
+      await auth.client.mutation("scenes:setBackgroundAudio", {
+        sceneId,
+        audio: {
+          ...background,
+          ...(volume !== undefined ? { volume } : {}),
+          ...(loop !== undefined ? { loop } : {}),
+        },
+      });
+    } else {
+      await fetchCli(
+        auth,
+        "audio/background/set",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sceneId,
+            ...(volume !== undefined ? { volume } : {}),
+            ...(loop !== undefined ? { loop } : {}),
+          }),
+        },
+        "audio-background-set",
+      );
+    }
+  } else {
+    const patch = {
+      ...(opts.position ? { position: parseVectorArg(opts.position, "Position") } : {}),
+      ...(volume !== undefined ? { volume } : {}),
+      ...(loop !== undefined ? { loop } : {}),
+      ...(opts.refDistance !== undefined
+        ? { refDistance: parseOptionalNumber(opts.refDistance, "refDistance") }
+        : {}),
+      ...(opts.maxDistance !== undefined
+        ? { maxDistance: parseOptionalNumber(opts.maxDistance, "maxDistance") }
+        : {}),
+      ...(opts.rolloffFactor !== undefined
+        ? { rolloffFactor: parseOptionalNumber(opts.rolloffFactor, "rolloffFactor") }
+        : {}),
+    };
+    if (auth.kind === "demo") {
+      await auth.client.mutation("scenes:updatePositionalAudio", {
+        sceneId,
+        audioId: normalized,
+        patch,
+      });
+    } else {
+      await fetchCli(
+        auth,
+        "audio/positional/set",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sceneId,
+            audioId: normalized,
+            ...patch,
+          }),
+        },
+        "audio-positional-set",
+      );
+    }
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify({ ok: true, sceneId, target: normalized }, null, 2));
+  } else {
+    console.log(`Updated audio settings for ${normalized} on ${sceneId}`);
+  }
+}
+
+async function cmdAudioRemove(sceneId, target, opts) {
+  const config = loadConfig();
+  const auth = resolveSceneAuth(config, opts);
+  await removeAudioTarget(auth, sceneId, target);
+  if (opts.json) {
+    console.log(JSON.stringify({ ok: true, sceneId, target }, null, 2));
+  } else {
+    console.log(`Removed ${target} from ${sceneId}`);
+  }
+}
+
 async function cmdAdoptDemoScenes(opts) {
   const config = loadConfig();
   if (demoMode(config, opts)) {
@@ -1428,6 +1804,106 @@ function buildProgram() {
     .action(async (sceneId, opts) => {
       try {
         await cmdSetView(sceneId, opts);
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  const audio = program
+    .command("audio")
+    .description("Manage background and positional scene audio");
+
+  audio
+    .command("list")
+    .description("List audio attached to a scene")
+    .argument("<sceneId>", "Convex scenes document id")
+    .option("--demo", "Use unauthenticated demo mode")
+    .option("--json", "JSON output")
+    .action(async (sceneId, opts) => {
+      try {
+        await cmdAudioList(sceneId, opts);
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  audio
+    .command("add-background")
+    .description("Attach or replace looping background audio")
+    .argument("<sceneId>", "Convex scenes document id")
+    .argument("<file>", "Local .mp3/.wav/.ogg file")
+    .option("--content-type <mime>", "Override MIME type")
+    .option("--volume <n>", "Volume multiplier")
+    .option("--no-loop", "Disable looping")
+    .option("--demo", "Use unauthenticated demo mode")
+    .option("--json", "JSON output")
+    .action(async (sceneId, file, opts) => {
+      try {
+        await cmdAudioAddBackground(sceneId, file, opts);
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  audio
+    .command("add-positional")
+    .description("Attach a positional audio source")
+    .argument("<sceneId>", "Convex scenes document id")
+    .argument("<file>", "Local .mp3/.wav/.ogg file")
+    .requiredOption("--position <x,y,z>", "World position")
+    .option("--id <audioId>", "Optional stable id for this positional source")
+    .option("--content-type <mime>", "Override MIME type")
+    .option("--volume <n>", "Volume multiplier")
+    .option("--no-loop", "Disable looping")
+    .option("--ref-distance <n>", "Reference distance", "1")
+    .option("--max-distance <n>", "Max distance", "100")
+    .option("--rolloff-factor <n>", "Rolloff factor", "1")
+    .option("--demo", "Use unauthenticated demo mode")
+    .option("--json", "JSON output")
+    .action(async (sceneId, file, opts) => {
+      try {
+        await cmdAudioAddPositional(sceneId, file, opts);
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  audio
+    .command("set")
+    .description("Update audio settings for background or a positional source")
+    .argument("<sceneId>", "Convex scenes document id")
+    .argument("<target>", 'Use "background" or a positional audio id')
+    .option("--position <x,y,z>", "New position for positional audio")
+    .option("--volume <n>", "Volume multiplier")
+    .option("--no-loop", "Disable looping")
+    .option("--ref-distance <n>", "Reference distance")
+    .option("--max-distance <n>", "Max distance")
+    .option("--rolloff-factor <n>", "Rolloff factor")
+    .option("--demo", "Use unauthenticated demo mode")
+    .option("--json", "JSON output")
+    .action(async (sceneId, target, opts) => {
+      try {
+        await cmdAudioSet(sceneId, target, opts);
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
+      }
+    });
+
+  audio
+    .command("remove")
+    .description("Remove background or positional audio")
+    .argument("<sceneId>", "Convex scenes document id")
+    .argument("<target>", 'Use "background" or a positional audio id')
+    .option("--demo", "Use unauthenticated demo mode")
+    .option("--json", "JSON output")
+    .action(async (sceneId, target, opts) => {
+      try {
+        await cmdAudioRemove(sceneId, target, opts);
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
         process.exit(1);

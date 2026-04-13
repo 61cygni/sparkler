@@ -54,6 +54,25 @@ function parseVisibility(value: unknown): "public" | "unlisted" | "private" {
   return "unlisted";
 }
 
+function parseAudioKind(value: unknown): "background" | "positional" | null {
+  if (value === "background" || value === "positional") {
+    return value;
+  }
+  return null;
+}
+
+function sceneAudioBody(scene: {
+  audio?: {
+    background?: unknown;
+    positional?: unknown[];
+  };
+}) {
+  return {
+    background: scene.audio?.background ?? null,
+    positional: scene.audio?.positional ?? [],
+  };
+}
+
 function jsonError(message: string, status: number) {
   return new Response(JSON.stringify({ error: message }), {
     status,
@@ -870,6 +889,768 @@ http.route({
           headers: jsonHeaders,
         },
       );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/audio",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+    const url = new URL(request.url);
+    const sceneId = url.searchParams.get("sceneId");
+    if (!sceneId?.trim()) {
+      return jsonError("sceneId is required", 400);
+    }
+    try {
+      const scene = await ctx.runQuery(internal.sceneInternals.get, {
+        sceneId: sceneId.trim() as never,
+      });
+      if (!scene || scene.ownerSubject !== auth.identity.subject) {
+        return jsonError("Not found or forbidden", 404);
+      }
+      return new Response(
+        JSON.stringify({
+          sceneId: sceneId.trim(),
+          ...sceneAudioBody(scene),
+        }),
+        { status: 200, headers: jsonHeaders },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/audio/background",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    const filename = typeof body.filename === "string" ? body.filename.trim() : "";
+    if (!sceneId || !filename) {
+      return jsonError("sceneId and filename are required", 400);
+    }
+    const contentType = typeof body.contentType === "string" ? body.contentType : undefined;
+    const byteSize =
+      typeof body.byteSize === "number" && Number.isFinite(body.byteSize)
+        ? body.byteSize
+        : undefined;
+    const volume =
+      typeof body.volume === "number" && Number.isFinite(body.volume) ? body.volume : undefined;
+    const loop = typeof body.loop === "boolean" ? body.loop : undefined;
+    try {
+      const presign = await ctx.runAction(internal.tigrisCli.presignAudioUploadForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId as never,
+        filename,
+        kind: "background",
+        contentType,
+        byteSize,
+      });
+      const audio = {
+        storageKey: presign.storageKey,
+        filename,
+        contentType: contentType ?? presign.headers["Content-Type"],
+        byteSize: byteSize ?? 0,
+        ...(volume !== undefined ? { volume } : {}),
+        ...(loop !== undefined ? { loop } : {}),
+      };
+      await ctx.runMutation(internal.scenes.setBackgroundAudioForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId as never,
+        audio: audio as never,
+      });
+      return new Response(
+        JSON.stringify({
+          uploadUrl: presign.url,
+          headers: presign.headers,
+          storageKey: presign.storageKey,
+          audio,
+        }),
+        { status: 200, headers: jsonHeaders },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/audio/positional",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    const filename = typeof body.filename === "string" ? body.filename.trim() : "";
+    const audioId = typeof body.audioId === "string" ? body.audioId.trim() : "";
+    const position = Array.isArray(body.position) ? body.position.map(Number) : null;
+    if (!sceneId || !filename || !audioId || !position || position.length < 3) {
+      return jsonError("sceneId, filename, audioId, and 3-number position are required", 400);
+    }
+    const contentType = typeof body.contentType === "string" ? body.contentType : undefined;
+    const byteSize =
+      typeof body.byteSize === "number" && Number.isFinite(body.byteSize)
+        ? body.byteSize
+        : undefined;
+    const volume =
+      typeof body.volume === "number" && Number.isFinite(body.volume) ? body.volume : undefined;
+    const loop = typeof body.loop === "boolean" ? body.loop : undefined;
+    const refDistance =
+      typeof body.refDistance === "number" && Number.isFinite(body.refDistance)
+        ? body.refDistance
+        : undefined;
+    const maxDistance =
+      typeof body.maxDistance === "number" && Number.isFinite(body.maxDistance)
+        ? body.maxDistance
+        : undefined;
+    const rolloffFactor =
+      typeof body.rolloffFactor === "number" && Number.isFinite(body.rolloffFactor)
+        ? body.rolloffFactor
+        : undefined;
+    try {
+      const presign = await ctx.runAction(internal.tigrisCli.presignAudioUploadForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId as never,
+        filename,
+        kind: "positional",
+        audioId,
+        contentType,
+        byteSize,
+      });
+      const audio = {
+        id: audioId,
+        storageKey: presign.storageKey,
+        filename,
+        contentType: contentType ?? presign.headers["Content-Type"],
+        byteSize: byteSize ?? 0,
+        position: position.slice(0, 3),
+        ...(volume !== undefined ? { volume } : {}),
+        ...(loop !== undefined ? { loop } : {}),
+        ...(refDistance !== undefined ? { refDistance } : {}),
+        ...(maxDistance !== undefined ? { maxDistance } : {}),
+        ...(rolloffFactor !== undefined ? { rolloffFactor } : {}),
+      };
+      await ctx.runMutation(internal.scenes.addPositionalAudioForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId as never,
+        audio: audio as never,
+      });
+      return new Response(
+        JSON.stringify({
+          uploadUrl: presign.url,
+          headers: presign.headers,
+          storageKey: presign.storageKey,
+          audio,
+        }),
+        { status: 200, headers: jsonHeaders },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/audio/background/set",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    if (!sceneId) {
+      return jsonError("sceneId is required", 400);
+    }
+    try {
+      const scene = await ctx.runQuery(internal.sceneInternals.get, {
+        sceneId: sceneId as never,
+      });
+      if (!scene || scene.ownerSubject !== auth.identity.subject || !scene.audio?.background) {
+        return jsonError("Background audio not found", 404);
+      }
+      const audio = {
+        ...scene.audio.background,
+        ...(typeof body.volume === "number" && Number.isFinite(body.volume)
+          ? { volume: body.volume }
+          : {}),
+        ...(typeof body.loop === "boolean" ? { loop: body.loop } : {}),
+      };
+      await ctx.runMutation(internal.scenes.setBackgroundAudioForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId as never,
+        audio: audio as never,
+      });
+      return new Response(JSON.stringify({ ok: true, sceneId }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/audio/positional/set",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    const audioId = typeof body.audioId === "string" ? body.audioId.trim() : "";
+    if (!sceneId || !audioId) {
+      return jsonError("sceneId and audioId are required", 400);
+    }
+    const patch: Record<string, unknown> = {};
+    if (Array.isArray(body.position)) patch.position = body.position.map(Number).slice(0, 3);
+    if (typeof body.volume === "number" && Number.isFinite(body.volume)) patch.volume = body.volume;
+    if (typeof body.loop === "boolean") patch.loop = body.loop;
+    if (typeof body.refDistance === "number" && Number.isFinite(body.refDistance)) {
+      patch.refDistance = body.refDistance;
+    }
+    if (typeof body.maxDistance === "number" && Number.isFinite(body.maxDistance)) {
+      patch.maxDistance = body.maxDistance;
+    }
+    if (typeof body.rolloffFactor === "number" && Number.isFinite(body.rolloffFactor)) {
+      patch.rolloffFactor = body.rolloffFactor;
+    }
+    try {
+      await ctx.runMutation(internal.scenes.updatePositionalAudioForOwner, {
+        ownerSubject: auth.identity.subject,
+        sceneId: sceneId as never,
+        audioId,
+        patch: patch as never,
+      });
+      return new Response(JSON.stringify({ ok: true, sceneId, audioId }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/api/cli/audio/remove",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await requireCliUser(ctx);
+    if (!auth.ok) {
+      return auth.response;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError("Invalid JSON body", 400);
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    const kind = parseAudioKind(body.kind);
+    if (!sceneId || !kind) {
+      return jsonError("sceneId and kind are required", 400);
+    }
+    try {
+      if (kind === "background") {
+        await ctx.runMutation(internal.scenes.removeBackgroundAudioForOwner, {
+          ownerSubject: auth.identity.subject,
+          sceneId: sceneId as never,
+        });
+      } else {
+        const audioId = typeof body.audioId === "string" ? body.audioId.trim() : "";
+        if (!audioId) {
+          return jsonError("audioId is required for positional audio", 400);
+        }
+        await ctx.runMutation(internal.scenes.removePositionalAudioForOwner, {
+          ownerSubject: auth.identity.subject,
+          sceneId: sceneId as never,
+          audioId,
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, sceneId, kind }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return jsonError(msg, 400);
+    }
+  }),
+});
+
+http.route({
+  path: "/cli/audio",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.SPARKLER_CLI_SECRET) {
+      return new Response(
+        JSON.stringify({ error: "CLI is disabled (SPARKLER_CLI_SECRET not set)" }),
+        { status: 503, headers: jsonHeaders },
+      );
+    }
+    if (!cliAuth(request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: jsonHeaders,
+      });
+    }
+    const url = new URL(request.url);
+    const sceneId = url.searchParams.get("sceneId");
+    if (!sceneId?.trim()) {
+      return new Response(JSON.stringify({ error: "sceneId is required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    try {
+      const scene = await ctx.runQuery(internal.sceneInternals.get, {
+        sceneId: sceneId.trim() as never,
+      });
+      const owner = process.env.SPARKLER_CLI_OWNER_SUBJECT?.trim();
+      if (!scene || scene.ownerSubject !== owner) {
+        return new Response(JSON.stringify({ error: "Not found or forbidden" }), {
+          status: 404,
+          headers: jsonHeaders,
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          sceneId: sceneId.trim(),
+          ...sceneAudioBody(scene),
+        }),
+        { status: 200, headers: jsonHeaders },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/cli/audio/background",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.SPARKLER_CLI_SECRET) {
+      return new Response(
+        JSON.stringify({ error: "CLI is disabled (SPARKLER_CLI_SECRET not set)" }),
+        { status: 503, headers: jsonHeaders },
+      );
+    }
+    if (!cliAuth(request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: jsonHeaders,
+      });
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    const filename = typeof body.filename === "string" ? body.filename.trim() : "";
+    if (!sceneId || !filename) {
+      return new Response(JSON.stringify({ error: "sceneId and filename are required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    const contentType = typeof body.contentType === "string" ? body.contentType : undefined;
+    const byteSize =
+      typeof body.byteSize === "number" && Number.isFinite(body.byteSize)
+        ? body.byteSize
+        : undefined;
+    const volume =
+      typeof body.volume === "number" && Number.isFinite(body.volume) ? body.volume : undefined;
+    const loop = typeof body.loop === "boolean" ? body.loop : undefined;
+    try {
+      const presign = await ctx.runAction(internal.tigrisCli.presignAudioUploadForCli, {
+        sceneId: sceneId as never,
+        filename,
+        kind: "background",
+        contentType,
+        byteSize,
+      });
+      const audio = {
+        storageKey: presign.storageKey,
+        filename,
+        contentType: contentType ?? presign.headers["Content-Type"],
+        byteSize: byteSize ?? 0,
+        ...(volume !== undefined ? { volume } : {}),
+        ...(loop !== undefined ? { loop } : {}),
+      };
+      await ctx.runMutation(internal.scenes.setBackgroundAudioForCli, {
+        sceneId: sceneId as never,
+        audio: audio as never,
+      });
+      return new Response(
+        JSON.stringify({
+          uploadUrl: presign.url,
+          headers: presign.headers,
+          storageKey: presign.storageKey,
+          audio,
+        }),
+        { status: 200, headers: jsonHeaders },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/cli/audio/positional",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.SPARKLER_CLI_SECRET) {
+      return new Response(
+        JSON.stringify({ error: "CLI is disabled (SPARKLER_CLI_SECRET not set)" }),
+        { status: 503, headers: jsonHeaders },
+      );
+    }
+    if (!cliAuth(request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: jsonHeaders,
+      });
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    const filename = typeof body.filename === "string" ? body.filename.trim() : "";
+    const audioId = typeof body.audioId === "string" ? body.audioId.trim() : "";
+    const position = Array.isArray(body.position) ? body.position.map(Number) : null;
+    if (!sceneId || !filename || !audioId || !position || position.length < 3) {
+      return new Response(
+        JSON.stringify({
+          error: "sceneId, filename, audioId, and 3-number position are required",
+        }),
+        { status: 400, headers: jsonHeaders },
+      );
+    }
+    const contentType = typeof body.contentType === "string" ? body.contentType : undefined;
+    const byteSize =
+      typeof body.byteSize === "number" && Number.isFinite(body.byteSize)
+        ? body.byteSize
+        : undefined;
+    const volume =
+      typeof body.volume === "number" && Number.isFinite(body.volume) ? body.volume : undefined;
+    const loop = typeof body.loop === "boolean" ? body.loop : undefined;
+    const refDistance =
+      typeof body.refDistance === "number" && Number.isFinite(body.refDistance)
+        ? body.refDistance
+        : undefined;
+    const maxDistance =
+      typeof body.maxDistance === "number" && Number.isFinite(body.maxDistance)
+        ? body.maxDistance
+        : undefined;
+    const rolloffFactor =
+      typeof body.rolloffFactor === "number" && Number.isFinite(body.rolloffFactor)
+        ? body.rolloffFactor
+        : undefined;
+    try {
+      const presign = await ctx.runAction(internal.tigrisCli.presignAudioUploadForCli, {
+        sceneId: sceneId as never,
+        filename,
+        kind: "positional",
+        audioId,
+        contentType,
+        byteSize,
+      });
+      const audio = {
+        id: audioId,
+        storageKey: presign.storageKey,
+        filename,
+        contentType: contentType ?? presign.headers["Content-Type"],
+        byteSize: byteSize ?? 0,
+        position: position.slice(0, 3),
+        ...(volume !== undefined ? { volume } : {}),
+        ...(loop !== undefined ? { loop } : {}),
+        ...(refDistance !== undefined ? { refDistance } : {}),
+        ...(maxDistance !== undefined ? { maxDistance } : {}),
+        ...(rolloffFactor !== undefined ? { rolloffFactor } : {}),
+      };
+      await ctx.runMutation(internal.scenes.addPositionalAudioForCli, {
+        sceneId: sceneId as never,
+        audio: audio as never,
+      });
+      return new Response(
+        JSON.stringify({
+          uploadUrl: presign.url,
+          headers: presign.headers,
+          storageKey: presign.storageKey,
+          audio,
+        }),
+        { status: 200, headers: jsonHeaders },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/cli/audio/background/set",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.SPARKLER_CLI_SECRET) {
+      return new Response(
+        JSON.stringify({ error: "CLI is disabled (SPARKLER_CLI_SECRET not set)" }),
+        { status: 503, headers: jsonHeaders },
+      );
+    }
+    if (!cliAuth(request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: jsonHeaders,
+      });
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    if (!sceneId) {
+      return new Response(JSON.stringify({ error: "sceneId is required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    try {
+      const scene = await ctx.runQuery(internal.sceneInternals.get, {
+        sceneId: sceneId as never,
+      });
+      const owner = process.env.SPARKLER_CLI_OWNER_SUBJECT?.trim();
+      if (!scene || scene.ownerSubject !== owner || !scene.audio?.background) {
+        return new Response(JSON.stringify({ error: "Background audio not found" }), {
+          status: 404,
+          headers: jsonHeaders,
+        });
+      }
+      const audio = {
+        ...scene.audio.background,
+        ...(typeof body.volume === "number" && Number.isFinite(body.volume)
+          ? { volume: body.volume }
+          : {}),
+        ...(typeof body.loop === "boolean" ? { loop: body.loop } : {}),
+      };
+      await ctx.runMutation(internal.scenes.setBackgroundAudioForCli, {
+        sceneId: sceneId as never,
+        audio: audio as never,
+      });
+      return new Response(JSON.stringify({ ok: true, sceneId }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/cli/audio/positional/set",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.SPARKLER_CLI_SECRET) {
+      return new Response(
+        JSON.stringify({ error: "CLI is disabled (SPARKLER_CLI_SECRET not set)" }),
+        { status: 503, headers: jsonHeaders },
+      );
+    }
+    if (!cliAuth(request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: jsonHeaders,
+      });
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    const audioId = typeof body.audioId === "string" ? body.audioId.trim() : "";
+    if (!sceneId || !audioId) {
+      return new Response(JSON.stringify({ error: "sceneId and audioId are required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    const patch: Record<string, unknown> = {};
+    if (Array.isArray(body.position)) patch.position = body.position.map(Number).slice(0, 3);
+    if (typeof body.volume === "number" && Number.isFinite(body.volume)) patch.volume = body.volume;
+    if (typeof body.loop === "boolean") patch.loop = body.loop;
+    if (typeof body.refDistance === "number" && Number.isFinite(body.refDistance)) {
+      patch.refDistance = body.refDistance;
+    }
+    if (typeof body.maxDistance === "number" && Number.isFinite(body.maxDistance)) {
+      patch.maxDistance = body.maxDistance;
+    }
+    if (typeof body.rolloffFactor === "number" && Number.isFinite(body.rolloffFactor)) {
+      patch.rolloffFactor = body.rolloffFactor;
+    }
+    try {
+      await ctx.runMutation(internal.scenes.updatePositionalAudioForCli, {
+        sceneId: sceneId as never,
+        audioId,
+        patch: patch as never,
+      });
+      return new Response(JSON.stringify({ ok: true, sceneId, audioId }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+  }),
+});
+
+http.route({
+  path: "/cli/audio/remove",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!process.env.SPARKLER_CLI_SECRET) {
+      return new Response(
+        JSON.stringify({ error: "CLI is disabled (SPARKLER_CLI_SECRET not set)" }),
+        { status: 503, headers: jsonHeaders },
+      );
+    }
+    if (!cliAuth(request)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: jsonHeaders,
+      });
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    const sceneId = typeof body.sceneId === "string" ? body.sceneId.trim() : "";
+    const kind = parseAudioKind(body.kind);
+    if (!sceneId || !kind) {
+      return new Response(JSON.stringify({ error: "sceneId and kind are required" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    try {
+      if (kind === "background") {
+        await ctx.runMutation(internal.scenes.removeBackgroundAudioForCli, {
+          sceneId: sceneId as never,
+        });
+      } else {
+        const audioId = typeof body.audioId === "string" ? body.audioId.trim() : "";
+        if (!audioId) {
+          return new Response(
+            JSON.stringify({ error: "audioId is required for positional audio" }),
+            { status: 400, headers: jsonHeaders },
+          );
+        }
+        await ctx.runMutation(internal.scenes.removePositionalAudioForCli, {
+          sceneId: sceneId as never,
+          audioId,
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, sceneId, kind }), {
+        status: 200,
+        headers: jsonHeaders,
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return new Response(JSON.stringify({ error: msg }), {

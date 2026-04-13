@@ -42,6 +42,7 @@ export default function Viewer() {
         filename={data.filename}
         title={data.title}
         defaultView={data.defaultView}
+        sceneAudio={data.audio}
         canEdit={data.isOwner}
       />
     </div>
