@@ -276,7 +276,6 @@ See [`cli-design.md`](./cli-design.md) for the full design.
 
 - `/` - Public gallery + your scenes  
 - `/admin/access` - Admin approval dashboard for pending users  
-- `/upload` - Presigned PUT upload flow  
 - `/s/:sceneId` - Full viewer (Spark `SparkRenderer` + `SplatMesh`, FPS controls, view HUD, thumbnail capture)  
 - `/embed/:sceneId` - Minimal viewer for iframes  
 - `/cli-login` - Clerk loopback for `sparkler login`  

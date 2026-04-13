@@ -395,7 +395,7 @@ export default function SplatViewer({
           filename,
         });
         splatMesh = new SplatMesh(meshOptions);
-        splatMesh.quaternion.set(0, 0, 0, 1);
+        splatMesh.quaternion.set(1, 0, 0, 0);
         scene.add(splatMesh);
         await splatMesh.initialized;
         if (

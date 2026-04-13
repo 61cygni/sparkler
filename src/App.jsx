@@ -3,7 +3,7 @@ import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-reac
 import { useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import Home from "./pages/Home.jsx";
-import Upload from "./pages/Upload.jsx";
+import Gallery from "./pages/Gallery.jsx";
 import Viewer from "./pages/Viewer.jsx";
 import Embed from "./pages/Embed.jsx";
 import CliLogin from "./pages/CliLogin.jsx";
@@ -60,7 +60,7 @@ export default function App() {
             <Link to="/" style={{ fontWeight: 700 }}>
               Sparkler
             </Link>
-            <Link to="/upload">Upload</Link>
+            <Link to="/gallery">Gallary</Link>
             {accountStatus?.isAdmin ? <Link to="/admin/access">Admin</Link> : null}
           </nav>
           <AuthChrome />
@@ -68,7 +68,7 @@ export default function App() {
       ) : null}
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/upload" element={<Upload />} />
+        <Route path="/gallery" element={<Gallery />} />
         <Route path="/s/:sceneId" element={<Viewer />} />
         <Route path="/embed/:sceneId" element={<Embed />} />
         <Route path="/cli-login" element={<CliLogin />} />

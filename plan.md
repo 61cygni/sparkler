@@ -76,11 +76,11 @@ Step-by-step build order for the Tigris + Convex + Vite (JS) + Spark 2.0 stack. 
 ## Phase 5 — Gallery and polish
 
 - [x] **List queries**: “my scenes” and/or public gallery (`visibility === "public"`).
-- [x] **Home / gallery UI**: cards with title, link to viewer, upload CTA.
+- [x] **Home / gallery UI**: cards with title and links to the viewer.
 - [x] **Embed route** `/embed/:id`: minimal chrome; document iframe usage.
 - [ ] **Environment**: production Convex deploy; production bucket; `VITE_CONVEX_URL` for client build.
 
-**Exit criteria**: Upload → appears in list → open share link in fresh session (public path).
+**Exit criteria**: Hosted scene appears in list → open share link in fresh session (public path).
 
 ---
 

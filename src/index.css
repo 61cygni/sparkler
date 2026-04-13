@@ -116,6 +116,71 @@ code {
   font-size: 1rem;
 }
 
+.terminal-panel {
+  margin: 1.5rem 0 2rem;
+  background: linear-gradient(180deg, #050705 0%, #020302 100%);
+  border: 1px solid #17351b;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(68, 255, 140, 0.05),
+    0 18px 40px rgba(0, 0, 0, 0.35),
+    inset 0 0 28px rgba(30, 255, 120, 0.04);
+}
+
+.terminal-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.9rem;
+  border-bottom: 1px solid #17351b;
+  background: rgba(18, 43, 20, 0.75);
+  color: #7dff9b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font:
+    0.72rem/1.2 "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    Menlo,
+    monospace;
+}
+
+.terminal-panel__body {
+  margin: 0;
+  padding: 1rem 1.1rem 0.9rem;
+  overflow-x: auto;
+  color: #6bff7d;
+  background:
+    radial-gradient(circle at top, rgba(90, 255, 130, 0.08), transparent 42%),
+    repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.02) 0,
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  text-shadow: 0 0 10px rgba(70, 255, 120, 0.15);
+  font:
+    0.95rem/1.75 "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    Menlo,
+    monospace;
+}
+
+.terminal-panel__footer {
+  margin: 0;
+  padding: 0 1.1rem 1rem;
+  color: #8ed79b;
+  font-size: 0.92rem;
+}
+
+.terminal-panel code {
+  color: #7dff9b;
+  background: rgba(34, 79, 38, 0.55);
+}
+
 .viewer-wrap {
   position: fixed;
   inset: 0;
