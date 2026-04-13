@@ -215,19 +215,214 @@ code {
   height: 100%;
 }
 
-.viewer-bar {
+.viewer-controls {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 12px;
+  left: 12px;
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 1rem;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), transparent);
-  z-index: 2;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10;
 }
 
-.embed .viewer-bar {
+.viewer-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  font-size: 24px;
+  line-height: 1;
+  color: #fff;
+  cursor: pointer;
+  background: rgba(20, 20, 20, 0.72);
+  border: 0;
+  border-radius: 999px;
+  backdrop-filter: blur(4px);
+}
+
+.viewer-button:hover {
+  background: rgba(20, 20, 20, 0.88);
+}
+
+.viewer-label {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 10;
+  padding: 10px 14px;
+  color: #fff;
+  border-radius: 999px;
+  backdrop-filter: blur(4px);
+  text-align: right;
+  background: rgba(20, 20, 20, 0.28);
+}
+
+.viewer-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.viewer-overlay-card {
+  width: min(480px, calc(100vw - 32px));
+  padding: 18px 20px;
+  color: #fff;
+  background: rgba(20, 20, 20, 0.5);
+  border-radius: 14px;
+  box-sizing: border-box;
+  backdrop-filter: blur(8px);
+}
+
+.viewer-overlay-card--tools {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.viewer-overlay-card h3,
+.viewer-overlay-card p {
+  margin: 0;
+}
+
+.viewer-overlay-intro {
+  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.45;
+}
+
+.viewer-overlay-controls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.viewer-overlay-mode-toggle {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.viewer-overlay-mode-toggle button {
+  padding: 8px 12px;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
+  border-radius: 999px;
+}
+
+.viewer-overlay-mode-toggle button.is-active {
+  color: #fff;
+  background: rgba(90, 170, 255, 0.7);
+}
+
+.viewer-overlay-controls-table {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.viewer-overlay-controls-row {
+  display: grid;
+  grid-template-columns: minmax(0, 8rem) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.viewer-overlay-controls-action {
+  white-space: nowrap;
+}
+
+.viewer-overlay-controls-effect {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.viewer-overlay-controls-action.emphasized,
+.viewer-overlay-controls-effect.emphasized {
+  font-weight: 700;
+}
+
+.viewer-overlay-close,
+.viewer-tools-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 12px 18px;
+  font-size: 16px;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.1);
+  border: 0;
+  border-radius: 10px;
+}
+
+.viewer-overlay-close {
+  margin-top: 24px;
+  margin-left: auto;
+}
+
+.viewer-tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.viewer-tools-button[disabled] {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.viewer-tools-pose {
+  margin: 16px 0 0;
+  padding: 12px;
+  overflow: auto;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  font:
+    12px/1.45 "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    Menlo,
+    monospace;
+}
+
+.viewer-error {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  color: #f5a8a8;
+  z-index: 20;
+  text-align: center;
+}
+
+.embed .viewer-controls,
+.embed .viewer-label,
+.embed .viewer-overlay {
   display: none;
+}
+
+.lil-gui {
+  --width: min(320px, 85vw);
+  --title-background-color: rgba(0, 0, 0, 0.5);
+  --background-color: rgba(0, 0, 0, 0.5);
+  --widget-color: rgba(0, 0, 0, 0.3);
+  --name-width: 8rem;
+}
+
+.lil-gui.root {
+  top: 0;
+  right: 0;
+}
+
+.lil-gui .slider,
+.lil-gui input[type="checkbox"] {
+  border: 1px solid rgba(255, 255, 255, 0.5);
 }

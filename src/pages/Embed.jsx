@@ -52,6 +52,7 @@ export default function Embed() {
         splatUrl={data.splatUrl}
         needsSignedUrl={data.needsSignedUrl}
         filename={data.filename}
+        title={data.title}
         defaultView={data.defaultView}
         minimal
       />

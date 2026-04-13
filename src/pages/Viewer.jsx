@@ -35,14 +35,12 @@ export default function Viewer() {
 
   return (
     <div className="viewer-wrap">
-      <div className="viewer-bar">
-        <span style={{ flex: 1 }}>{data.filename || data.title}</span>
-      </div>
       <SplatViewer
         sceneId={data._id}
         splatUrl={data.splatUrl}
         needsSignedUrl={data.needsSignedUrl}
         filename={data.filename}
+        title={data.title}
         defaultView={data.defaultView}
         canEdit={data.isOwner}
       />
