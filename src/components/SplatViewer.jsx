@@ -24,9 +24,14 @@ import {
 
 const BASE_MOVE_SPEED = 1.5;
 const SHIFT_MULTIPLIER = 4;
+const XR_TURN_DEADZONE = 0.1;
+const XR_TURN_SPEED = 1.5;
 const viewerDebugEnabled =
   import.meta.env.DEV || import.meta.env.VITE_SPARKLER_DEBUG_VIEWER === "1";
 const DEFAULT_BACKGROUND = 0x000000;
+const XR_WORLD_Y_AXIS = new THREE.Vector3(0, 1, 0);
+const XR_TURN_QUAT = new THREE.Quaternion();
+const XR_TURN_AXIS = new THREE.Vector3();
 const HELP_DESKTOP_CONTROLS = [
   ["Click and drag", "Look around", true],
   ["[W][A][S][D]", "Move", true],
@@ -212,6 +217,44 @@ function parseViewerOptions(search, isViewMode) {
     useJoystick: parseBooleanParam(params.get("useJoystick"), isMobileDevice()),
     usePressMove: parseBooleanParam(params.get("usePressMove"), true),
   };
+}
+
+function applyXrYawTurn(localFrame, renderer, deltaTime, turnAxis = XR_WORLD_Y_AXIS) {
+  if (!renderer.xr.isPresenting) {
+    return;
+  }
+  const session = renderer.xr.getSession();
+  if (!session) {
+    return;
+  }
+
+  let yaw = 0;
+  for (const source of session.inputSources) {
+    const gamepad = source.gamepad;
+    if (!gamepad || source.handedness !== "right") {
+      continue;
+    }
+    const rawYaw = gamepad.axes[2] ?? 0;
+    if (Math.abs(rawYaw) > XR_TURN_DEADZONE) {
+      yaw = rawYaw;
+      break;
+    }
+  }
+
+  if (yaw === 0) {
+    return;
+  }
+
+  const yawAmount = -yaw * XR_TURN_SPEED * deltaTime;
+  XR_TURN_AXIS.copy(turnAxis);
+  if (XR_TURN_AXIS.lengthSq() < 1e-8) {
+    XR_TURN_AXIS.copy(XR_WORLD_Y_AXIS);
+  } else {
+    XR_TURN_AXIS.normalize();
+  }
+  XR_TURN_QUAT.setFromAxisAngle(XR_TURN_AXIS, yawAmount);
+  localFrame.quaternion.premultiply(XR_TURN_QUAT);
+  localFrame.quaternion.normalize();
 }
 
 async function createThumbnailBlob(sourceCanvas) {
@@ -474,6 +517,7 @@ export default function SplatViewer({
   const playAudioRef = useRef(async () => false);
   const stopAudioRef = useRef(() => {});
   const xrRef = useRef(null);
+  const xrTurnAxisRef = useRef(XR_WORLD_Y_AXIS.clone());
   const presignView = useAction(api.tigris.presignView);
   const resolveSceneAudio = useAction(api.tigris.resolveSceneAudio);
   const presignThumbnailUpload = useAction(api.tigris.presignThumbnailUpload);
@@ -517,6 +561,7 @@ export default function SplatViewer({
     setAudioEnabled(false);
     setXrSupported(false);
     setXrPresenting(false);
+    xrTurnAxisRef.current.copy(XR_WORLD_Y_AXIS);
   }, [sceneId, viewerMode]);
 
   useEffect(() => {
@@ -712,7 +757,6 @@ export default function SplatViewer({
       };
 
       const controls = new SparkControls({ canvas: renderer.domElement });
-      controls.fpsMovement.xr = renderer.xr;
       controls.fpsMovement.enable = true;
       controls.fpsMovement.moveSpeed = viewerOptions.moveSpeed;
       controls.fpsMovement.shiftMultiplier = SHIFT_MULTIPLIER;
@@ -786,6 +830,7 @@ export default function SplatViewer({
         referenceSpaceType: "local-floor",
         controllers: {
           moveSpeed: moveSpeedState.value,
+          getRotate: () => new THREE.Vector3(0, 0, 0),
         },
         onReady: (supported) => {
           if (!cancelled) {
@@ -794,6 +839,7 @@ export default function SplatViewer({
         },
         onEnterXr: () => {
           if (!cancelled) {
+            xrTurnAxisRef.current.copy(XR_WORLD_Y_AXIS).applyQuaternion(localFrame.quaternion).normalize();
             setXrPresenting(true);
             setShareToast("Entered VR");
             window.setTimeout(() => setShareToast(""), 1400);
@@ -801,6 +847,7 @@ export default function SplatViewer({
         },
         onExitXr: () => {
           if (!cancelled) {
+            xrTurnAxisRef.current.copy(XR_WORLD_Y_AXIS);
             setXrPresenting(false);
             setShareToast("Exited VR");
             window.setTimeout(() => setShareToast(""), 1400);
@@ -1078,6 +1125,7 @@ export default function SplatViewer({
         lastTime = now;
         if (xrPresenting || renderer.xr.isPresenting) {
           xr.updateControllers(camera);
+          applyXrYawTurn(localFrame, renderer, deltaTime, xrTurnAxisRef.current);
         }
         controls.update(localFrame, camera);
         if (!startupPoseLoggedRef.current) {
@@ -1144,6 +1192,7 @@ export default function SplatViewer({
         resetViewRef.current = () => {};
         shareConfigRef.current = null;
         xrRef.current = null;
+        xrTurnAxisRef.current.copy(XR_WORLD_Y_AXIS);
         stopAudioRef.current();
         playAudioRef.current = async () => false;
         stopAudioRef.current = () => {};
