@@ -53,8 +53,8 @@ export default function Embed() {
         needsSignedUrl={data.needsSignedUrl}
         filename={data.filename}
         title={data.title}
+        viewerMode="view"
         defaultView={data.defaultView}
-        minimal
       />
     </div>
   );

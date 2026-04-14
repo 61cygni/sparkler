@@ -1,12 +1,7 @@
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import CliQuickstartPanel from "../components/CliQuickstartPanel.jsx";
 import SceneGrid from "../components/SceneGrid.jsx";
-const INSTALL_SNIPPET = [
-  "curl -fsSL https://raw.githubusercontent.com/61cygni/sparkler/main/public/setup.sh -o setup.sh",
-  "bash setup.sh",
-  "./bin/sparkler login",
-  "./bin/sparkler host ./myscan.spz",
-];
 
 export default function Home() {
   const accountStatus = useQuery(api.users.getMyAccountStatus);
@@ -17,17 +12,13 @@ export default function Home() {
     <div className="page">
       <h1 style={{ marginTop: 0 }}>Gaussian splat hosting</h1>
       {signedOut ? (
-        <section className="terminal-panel" aria-label="CLI quickstart">
-          <div className="terminal-panel__header">
-            <span>sparkler quickstart</span>
-          </div>
-          <pre className="terminal-panel__body">
-            {INSTALL_SNIPPET.map((line) => `$ ${line}`).join("\n")}
-          </pre>
-          <p className="terminal-panel__footer">
-            Sign in from the CLI, then host with <code>./bin/sparkler host &lt;file&gt;</code>.
-          </p>
-        </section>
+        <CliQuickstartPanel
+          footer={
+            <>
+              Sign in from the CLI, then host with <code>./bin/sparkler host &lt;file&gt;</code>.
+            </>
+          }
+        />
       ) : null}
       {accountStatus?.approvalStatus === "pending" ? (
         <p className="muted">

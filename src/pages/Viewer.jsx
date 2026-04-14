@@ -1,13 +1,15 @@
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import SplatViewer from "../components/SplatViewer.jsx";
 
 export default function Viewer() {
   const { sceneId } = useParams();
+  const location = useLocation();
   const data = useQuery(api.scenes.getScene, {
     sceneId: sceneId,
   });
+  const isPassiveView = new URLSearchParams(location.search).get("mode") === "view";
 
   if (data === undefined) {
     return (
@@ -41,9 +43,9 @@ export default function Viewer() {
         needsSignedUrl={data.needsSignedUrl}
         filename={data.filename}
         title={data.title}
+        viewerMode={isPassiveView ? "view" : data.isOwner ? "owner" : "normal"}
         defaultView={data.defaultView}
         sceneAudio={data.audio}
-        canEdit={data.isOwner}
       />
     </div>
   );
