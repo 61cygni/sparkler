@@ -1,7 +1,5 @@
 node_modules
 dist
-!vendor/spark/dist/
-!vendor/spark/dist/**
 .env
 .env.*
 .env.local

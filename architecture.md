@@ -1,6 +1,6 @@
 # Sparkler — Architecture
 
-Sparkler is a Gaussian splat hosting and viewing product: users upload splat files, browse a library, and open shareable viewer URLs. Rendering uses **Spark 2.0** from the local [`spark`](../spark/) package (`SparkRenderer`, `SplatMesh`). The control plane and OLTP run on **Convex**. Large binaries live in **Tigris** (S3-compatible object storage); browsers upload and download them directly via presigned URLs.
+Sparkler is a Gaussian splat hosting and viewing product: users upload splat files, browse a library, and open shareable viewer URLs. Rendering uses **Spark 2.0** (`@sparkjsdev/spark` from npm) with `SparkRenderer` and `SplatMesh`. The control plane and OLTP run on **Convex**. Large binaries live in **Tigris** (S3-compatible object storage); browsers upload and download them directly via presigned URLs.
 
 ---
 
@@ -51,12 +51,12 @@ flowchart TB
 | Area | Choice | Notes |
 |------|--------|--------|
 | Frontend | **Vite**, **JavaScript** (ES modules), **React** (recommended with Convex) | Convex’s official client is React-first; plain JS is possible with `ConvexHttpClient` for a thinner stack. |
-| Rendering | **Spark 2.0** — [`../spark`](../spark/) | Build Spark first (`npm run build` in `spark`); depend via `"@sparkjsdev/spark": "file:../spark"`. Use **`SparkRenderer`** (pass `renderer: THREE.WebGLRenderer`) and add it to the scene; use **`SplatMesh`** with `url` (and optional `lod: true`, `fileType` when needed). Docs in spark refer to “NewSparkRenderer” in places; the exported class is **`SparkRenderer`**. |
+| Rendering | **Spark 2.0** — `@sparkjsdev/spark` | Install from npm (`npm install @sparkjsdev/spark`). Use **`SparkRenderer`** (pass `renderer: THREE.WebGLRenderer`) and add it to the scene; use **`SplatMesh`** with `url` (and optional `lod: true`, `fileType` when needed). The exported class is **`SparkRenderer`**. |
 | Backend / OLTP | **Convex** | Schema, queries, mutations, realtime subscriptions, scheduled jobs if needed. |
 | Blob storage | **Tigris** | S3 API; credentials and endpoint in Convex environment variables. |
 | Auth | **Clerk + Convex** with demo fallback | Clerk is the primary auth path; `SPARKLER_DEMO_OWNER_SUBJECT` supports local no-auth development. |
 
-**Three.js**: Align major version with Spark’s peer expectations (see `spark/package.json` devDependencies, e.g. `three`).
+**Three.js**: Align major version with Spark peer dependency expectations (`three` in `@sparkjsdev/spark` peerDependencies).
 
 ---
 
