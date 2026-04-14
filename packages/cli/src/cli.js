@@ -569,7 +569,12 @@ async function cmdLogin(opts) {
   }
 }
 
-function resolveSparkRoot() {
+function resolveBuildLodManifest() {
+  const bundled = path.resolve(__dirname, "..", "..", "..", "rust", "build-lod", "Cargo.toml");
+  if (existsSync(bundled)) {
+    return bundled;
+  }
+
   const env = process.env.SPARKLER_SPARK_ROOT;
   const candidates = [
     env,
@@ -578,24 +583,25 @@ function resolveSparkRoot() {
   ].filter(Boolean);
 
   for (const candidate of candidates) {
-    const packagePath = path.join(candidate, "package.json");
     const cargoPath = path.join(candidate, "rust", "build-lod", "Cargo.toml");
-    if (!existsSync(packagePath) || !existsSync(cargoPath)) {
-      continue;
-    }
-    try {
-      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
-      if (pkg.scripts?.["build-lod"]) {
-        return path.resolve(candidate);
-      }
-    } catch {
-      /* ignore candidate */
+    if (existsSync(cargoPath)) {
+      return path.resolve(cargoPath);
     }
   }
 
   throw new Error(
-    "Could not find a Spark checkout with npm run build-lod. Set SPARKLER_SPARK_ROOT to the spark repo root.",
+    "Could not find build-lod. Expected bundled rust/build-lod/Cargo.toml in the sparkler repo.",
   );
+}
+
+function runBuildLod(args, opts = {}) {
+  const manifest = resolveBuildLodManifest();
+  const result = spawnSync(
+    "cargo",
+    ["run", "--manifest-path", manifest, "--release", "--", ...args],
+    { stdio: "inherit", shell: false, ...opts },
+  );
+  return result;
 }
 
 function defaultRadPath(inputAbs) {
@@ -652,18 +658,13 @@ function parseConvertArgv(argv) {
 
 function cmdConvert(argv) {
   const { positional, output, passthrough } = parseConvertArgv(argv);
-  const sparkRoot = resolveSparkRoot();
   for (const input of positional) {
     const abs = path.resolve(input);
     if (!existsSync(abs)) {
       console.error(`Not found: ${abs}`);
       process.exit(1);
     }
-    const result = spawnSync(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      ["run", "build-lod", "--", abs, ...passthrough],
-      { cwd: sparkRoot, stdio: "inherit", shell: false },
-    );
+    const result = runBuildLod([abs, ...passthrough]);
     if (result.status !== 0) {
       process.exit(result.status ?? 1);
     }
@@ -709,13 +710,8 @@ function prepareHostFile(absPath, opts) {
     const base = path.basename(absPath);
     const tmpInput = path.join(tmpRoot, base);
     copyFileSync(absPath, tmpInput);
-    const sparkRoot = resolveSparkRoot();
     const qualityArgs = opts.quick ? [] : ["--quality"];
-    const result = spawnSync(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      ["run", "build-lod", "--", tmpInput, ...qualityArgs],
-      { cwd: sparkRoot, stdio: "inherit", shell: false },
-    );
+    const result = runBuildLod([tmpInput, ...qualityArgs]);
     if (result.status !== 0) {
       cleanup();
       process.exit(result.status ?? 1);
@@ -1638,7 +1634,7 @@ Environment:
   SPARKLER_CONVEX_URL       https://<deployment>.convex.cloud (login or demo mode)
   SPARKLER_CONVEX_SITE_URL  https://<deployment>.convex.site (optional override for HTTP routes)
   SPARKLER_DEPLOYMENT_URL   Origin of the Sparkler web app
-  SPARKLER_SPARK_ROOT       Path to a Spark checkout for convert/default host conversion
+  SPARKLER_SPARK_ROOT       Override path to Spark source tree (fallback for build-lod)
   SPARKLER_DEMO             1/true enables local demo mode
   SPARKLER_CLI_TOKEN        Shared secret for admin automation routes only
 `);

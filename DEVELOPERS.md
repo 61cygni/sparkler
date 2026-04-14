@@ -7,7 +7,7 @@ Vite + React (JavaScript) app for hosting Gaussian splats: **Convex** (metadata 
 - Node 18+
 - A [Convex](https://www.convex.dev/) project
 - A [Tigris](https://www.tigrisdata.com/) bucket (or other S3-compatible API)
-- Optional for `sparkler convert` / default non-`.rad` CLI uploads: a local Spark checkout with `npm run build-lod`
+- Optional for `sparkler convert` / default non-`.rad` CLI uploads: Rust toolchain (`cargo`) for building `build-lod`
 
 ## Setup
 
@@ -137,7 +137,7 @@ The installer defaults to the GitHub repo `61cygni/sparkler` and downloads the `
 |---------|---------|
 | `sparkler login` | Opens `/cli-login` (Clerk). After sign-in, loopback saves your Convex JWT to `$XDG_CONFIG_HOME/sparkler/credentials.json` (the installer sets this to `./.config/sparkler/credentials.json` by default). |
 | `sparkler logout` | Removes the saved CLI token from `$XDG_CONFIG_HOME/sparkler/credentials.json` and, when the deployment URL is known, opens `/cli-logout` to sign out the active Clerk browser session too. |
-| `sparkler convert <input>... [-o out.rad] [-- <build-lod-args>]` | Runs Spark's `npm run build-lod` (needs Rust toolchain + `../spark` or `SPARKLER_SPARK_ROOT`). Writes `<name>-lod.rad` next to each input unless `-o` is used (single input only). |
+| `sparkler convert <input>... [-o out.rad] [-- <build-lod-args>]` | Runs the bundled `build-lod` via `cargo` (needs Rust toolchain). Writes `<name>-lod.rad` next to each input unless `-o` is used (single input only). |
 | `sparkler host <file>` | **Clerk (default):** authenticated `/api/cli/*` routes on `*.convex.site` + presigned PUT + finalize. **Demo:** unauthenticated Convex calls with `--demo` / `SPARKLER_DEMO=1` and Convex `SPARKLER_DEMO_OWNER_SUBJECT`. **Admin automation:** shared-secret `/cli/*` + `SPARKLER_CLI_TOKEN`. Non-`.rad` files run through `build-lod` in a temp dir unless `--no-convert`. |
 | `sparkler dashboard` | Opens the Sparkler dashboard using the saved deployment URL from `sparkler login` or `SPARKLER_DEPLOYMENT_URL`. |
 | `sparkler view <sceneId>` | Opens the full viewer page for a specific scene and prints its URL. |
@@ -177,7 +177,7 @@ If the saved Clerk JWT has expired, user-scoped CLI commands now detect that loc
 
 | Variable | Purpose |
 |----------|---------|
-| `SPARKLER_SPARK_ROOT` | Path to Spark repo for `convert` / default `host` conversion (optional if `../spark` exists) |
+| `SPARKLER_SPARK_ROOT` | Override path to a Spark source tree for `build-lod` (optional; the bundled `rust/build-lod` is used by default) |
 
 Optional config file: `$XDG_CONFIG_HOME/sparkler/config.json` with `convexSiteUrl`, `deploymentUrl`, `convexUrl`. Without `XDG_CONFIG_HOME`, that defaults to `~/.config/sparkler/config.json`.
 

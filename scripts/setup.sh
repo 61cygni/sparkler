@@ -241,14 +241,14 @@ print_path_hint() {
 print_conversion_note() {
   if command_exists cargo; then
     say
-    say "Rust detected: local Spark build-lod conversion is available once SPARKLER_SPARK_ROOT points at a Spark checkout."
+    say "Rust detected: sparkler convert and automatic .rad conversion during host are available."
     return
   fi
 
   say
   say "Optional conversion note:"
   say "  sparkler host myscan.rad works immediately."
-  say "  For non-.rad uploads like .spz or .ply, install Rust and point SPARKLER_SPARK_ROOT at a Spark checkout with npm run build-lod."
+  say "  For non-.rad uploads like .spz or .ply, install Rust (https://rustup.rs) so cargo is available."
 }
 
 main() {
