@@ -17,6 +17,7 @@ import { api } from "../../convex/_generated/api";
 import {
   disposeMobileControls,
   getMobileInput,
+  getMobileInputRight,
   initMobileControls,
   isMobileDevice,
   setMobileControlsEnabled,
@@ -24,6 +25,7 @@ import {
 
 const BASE_MOVE_SPEED = 1.5;
 const SHIFT_MULTIPLIER = 4;
+const MOBILE_TURN_SPEED = 1.5;
 const XR_TURN_DEADZONE = 0.1;
 const XR_TURN_SPEED = 1.5;
 const viewerDebugEnabled =
@@ -311,23 +313,40 @@ async function createThumbnailBlob(sourceCanvas) {
   };
 }
 
+const _mobileTurnQuat = new THREE.Quaternion();
+
 function applyMobileMovement(localFrame, deltaTime) {
   const mobile = getMobileInput();
-  if (!mobile.active) {
+  const mobileRight = getMobileInputRight();
+  if (!mobile.active && !mobileRight.active) {
     return;
   }
-  const forward = new THREE.Vector3(0, 0, -1);
-  const right = new THREE.Vector3(1, 0, 0);
-  forward.applyQuaternion(localFrame.quaternion);
-  right.applyQuaternion(localFrame.quaternion);
-  forward.y = 0;
-  right.y = 0;
-  if (forward.lengthSq() > 0) forward.normalize();
-  if (right.lengthSq() > 0) right.normalize();
-
   const velocity = new THREE.Vector3();
-  velocity.addScaledVector(right, mobile.x);
-  velocity.addScaledVector(forward, -mobile.y);
+
+  if (mobile.active) {
+    const forward = new THREE.Vector3(0, 0, -1);
+    const right = new THREE.Vector3(1, 0, 0);
+    forward.applyQuaternion(localFrame.quaternion);
+    right.applyQuaternion(localFrame.quaternion);
+    forward.y = 0;
+    right.y = 0;
+    if (forward.lengthSq() > 0) forward.normalize();
+    if (right.lengthSq() > 0) right.normalize();
+    velocity.addScaledVector(right, mobile.x);
+    velocity.addScaledVector(forward, -mobile.y);
+  }
+
+  if (mobileRight.active) {
+    velocity.y += mobileRight.y;
+
+    if (Math.abs(mobileRight.x) > 0) {
+      const yawAmount = mobileRight.x * MOBILE_TURN_SPEED * deltaTime;
+      _mobileTurnQuat.setFromAxisAngle(XR_WORLD_Y_AXIS, yawAmount);
+      localFrame.quaternion.premultiply(_mobileTurnQuat);
+      localFrame.quaternion.normalize();
+    }
+  }
+
   if (velocity.lengthSq() > 0) {
     velocity.normalize().multiplyScalar(BASE_MOVE_SPEED * deltaTime * 3);
     localFrame.position.add(velocity);
@@ -792,7 +811,7 @@ export default function SplatViewer({
       const reverseSlideState = {
         value: viewerOptions.reverseSlide,
       };
-      const mobileControlsAvailable = mobileDevice && showControlChrome;
+      const mobileControlsAvailable = mobileDevice;
       debugLog(sceneId, "configured controls", {
         moveSpeed: controls.fpsMovement.moveSpeed,
         shiftMultiplier: controls.fpsMovement.shiftMultiplier,

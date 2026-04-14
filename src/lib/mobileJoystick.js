@@ -2,7 +2,7 @@ const CONFIG = {
   joystickSize: 120,
   knobSize: 50,
   deadzone: 0.15,
-  marginLeft: 30,
+  marginX: 30,
   marginBottom: 30,
   outerColor: "rgba(255, 255, 255, 0.2)",
   outerBorder: "rgba(255, 255, 255, 0.4)",
@@ -12,15 +12,14 @@ const CONFIG = {
 
 let initialized = false;
 let enabled = true;
-let joystickContainer = null;
-let joystickKnob = null;
-let activeTouch = null;
-let joystickCenter = { x: 0, y: 0 };
-let currentInput = { x: 0, y: 0, active: false };
+
+const sticks = {
+  left: { container: null, knob: null, touch: null, center: { x: 0, y: 0 }, input: { x: 0, y: 0, active: false } },
+  right: { container: null, knob: null, touch: null, center: { x: 0, y: 0 }, input: { x: 0, y: 0, active: false } },
+};
 
 let resizeHandler = null;
 let orientationHandler = null;
-let touchStartHandler = null;
 let touchMoveHandler = null;
 let touchEndHandler = null;
 
@@ -49,7 +48,8 @@ export function initMobileControls(options = {}) {
     return;
   }
   Object.assign(CONFIG, options);
-  createJoystickUI();
+  createStickUI("left");
+  createStickUI("right");
   attachEventListeners();
   initialized = true;
 }
@@ -58,16 +58,25 @@ export function getMobileInput() {
   if (!enabled || !initialized) {
     return { x: 0, y: 0, active: false };
   }
-  return { ...currentInput };
+  return { ...sticks.left.input };
+}
+
+export function getMobileInputRight() {
+  if (!enabled || !initialized) {
+    return { x: 0, y: 0, active: false };
+  }
+  return { ...sticks.right.input };
 }
 
 export function setMobileControlsEnabled(value) {
   enabled = value;
-  if (joystickContainer) {
-    joystickContainer.style.display = enabled ? "block" : "none";
-  }
-  if (!enabled) {
-    currentInput = { x: 0, y: 0, active: false };
+  for (const stick of Object.values(sticks)) {
+    if (stick.container) {
+      stick.container.style.display = enabled ? "block" : "none";
+    }
+    if (!enabled) {
+      stick.input = { x: 0, y: 0, active: false };
+    }
   }
 }
 
@@ -81,9 +90,6 @@ export function disposeMobileControls() {
   if (orientationHandler) {
     window.removeEventListener("orientationchange", orientationHandler);
   }
-  if (joystickContainer && touchStartHandler) {
-    joystickContainer.removeEventListener("touchstart", touchStartHandler);
-  }
   if (touchMoveHandler) {
     document.removeEventListener("touchmove", touchMoveHandler);
   }
@@ -91,25 +97,31 @@ export function disposeMobileControls() {
     document.removeEventListener("touchend", touchEndHandler);
     document.removeEventListener("touchcancel", touchEndHandler);
   }
-  joystickContainer?.remove();
-  joystickContainer = null;
-  joystickKnob = null;
-  activeTouch = null;
-  currentInput = { x: 0, y: 0, active: false };
+  for (const stick of Object.values(sticks)) {
+    stick.container?.remove();
+    stick.container = null;
+    stick.knob = null;
+    stick.touch = null;
+    stick.input = { x: 0, y: 0, active: false };
+  }
   initialized = false;
   resizeHandler = null;
   orientationHandler = null;
-  touchStartHandler = null;
   touchMoveHandler = null;
   touchEndHandler = null;
 }
 
-function createJoystickUI() {
-  joystickContainer = document.createElement("div");
-  joystickContainer.id = "mobile-joystick";
-  joystickContainer.style.cssText = `
+function createStickUI(side) {
+  const stick = sticks[side];
+  const container = document.createElement("div");
+  container.id = `mobile-joystick-${side}`;
+  const positionCSS =
+    side === "left"
+      ? `left: ${CONFIG.marginX}px;`
+      : `right: ${CONFIG.marginX}px;`;
+  container.style.cssText = `
     position: fixed;
-    left: ${CONFIG.marginLeft}px;
+    ${positionCSS}
     bottom: ${CONFIG.marginBottom}px;
     width: ${CONFIG.joystickSize}px;
     height: ${CONFIG.joystickSize}px;
@@ -118,8 +130,8 @@ function createJoystickUI() {
     pointer-events: auto;
   `;
 
-  const joystickOuter = document.createElement("div");
-  joystickOuter.style.cssText = `
+  const outer = document.createElement("div");
+  outer.style.cssText = `
     position: absolute;
     width: 100%;
     height: 100%;
@@ -129,8 +141,8 @@ function createJoystickUI() {
     box-sizing: border-box;
   `;
 
-  joystickKnob = document.createElement("div");
-  joystickKnob.style.cssText = `
+  const knob = document.createElement("div");
+  knob.style.cssText = `
     position: absolute;
     width: ${CONFIG.knobSize}px;
     height: ${CONFIG.knobSize}px;
@@ -142,103 +154,122 @@ function createJoystickUI() {
     transition: background 0.1s;
   `;
 
-  joystickOuter.appendChild(joystickKnob);
-  joystickContainer.appendChild(joystickOuter);
-  document.body.appendChild(joystickContainer);
-  updateJoystickCenter();
+  outer.appendChild(knob);
+  container.appendChild(outer);
+  document.body.appendChild(container);
+
+  stick.container = container;
+  stick.knob = knob;
+  updateStickCenter(stick);
+
+  container.addEventListener(
+    "touchstart",
+    (event) => handleTouchStart(event, stick),
+    { passive: false },
+  );
 }
 
-function updateJoystickCenter() {
-  if (!joystickContainer) return;
-  const rect = joystickContainer.getBoundingClientRect();
-  joystickCenter = {
+function updateStickCenter(stick) {
+  if (!stick.container) return;
+  const rect = stick.container.getBoundingClientRect();
+  stick.center = {
     x: rect.left + rect.width / 2,
     y: rect.top + rect.height / 2,
   };
 }
 
 function attachEventListeners() {
-  resizeHandler = () => updateJoystickCenter();
-  orientationHandler = () => {
-    window.setTimeout(updateJoystickCenter, 100);
+  resizeHandler = () => {
+    updateStickCenter(sticks.left);
+    updateStickCenter(sticks.right);
   };
-  touchStartHandler = (event) => handleTouchStart(event);
+  orientationHandler = () => {
+    window.setTimeout(resizeHandler, 100);
+  };
   touchMoveHandler = (event) => handleTouchMove(event);
   touchEndHandler = (event) => handleTouchEnd(event);
 
   window.addEventListener("resize", resizeHandler);
   window.addEventListener("orientationchange", orientationHandler);
-  joystickContainer.addEventListener("touchstart", touchStartHandler, {
-    passive: false,
-  });
   document.addEventListener("touchmove", touchMoveHandler, { passive: false });
   document.addEventListener("touchend", touchEndHandler, { passive: false });
   document.addEventListener("touchcancel", touchEndHandler, { passive: false });
 }
 
-function handleTouchStart(event) {
-  if (!enabled || activeTouch !== null) return;
+function handleTouchStart(event, stick) {
+  if (!enabled || stick.touch !== null) return;
   const touch = event.changedTouches[0];
-  activeTouch = touch.identifier;
-  updateJoystickCenter();
-  updateJoystickPosition(touch.clientX, touch.clientY);
-  joystickKnob.style.background = CONFIG.knobActiveColor;
-  currentInput.active = true;
+  stick.touch = touch.identifier;
+  updateStickCenter(stick);
+  updateStickPosition(stick, touch.clientX, touch.clientY);
+  stick.knob.style.background = CONFIG.knobActiveColor;
+  stick.input.active = true;
   event.preventDefault();
 }
 
 function handleTouchMove(event) {
-  if (!enabled || activeTouch === null) return;
+  if (!enabled) return;
   for (const touch of event.changedTouches) {
-    if (touch.identifier === activeTouch) {
-      updateJoystickPosition(touch.clientX, touch.clientY);
-      event.preventDefault();
-      break;
+    for (const stick of Object.values(sticks)) {
+      if (stick.touch === touch.identifier) {
+        updateStickPosition(stick, touch.clientX, touch.clientY);
+        event.preventDefault();
+        break;
+      }
     }
   }
 }
 
 function handleTouchEnd(event) {
-  if (activeTouch === null) return;
   for (const touch of event.changedTouches) {
-    if (touch.identifier === activeTouch) {
-      resetJoystick();
-      break;
+    for (const stick of Object.values(sticks)) {
+      if (stick.touch === touch.identifier) {
+        resetStick(stick);
+        break;
+      }
     }
   }
 }
 
-function updateJoystickPosition(touchX, touchY) {
+function updateStickPosition(stick, touchX, touchY) {
   const maxRadius = (CONFIG.joystickSize - CONFIG.knobSize) / 2;
 
-  let dx = touchX - joystickCenter.x;
-  let dy = touchY - joystickCenter.y;
+  let dx = touchX - stick.center.x;
+  let dy = touchY - stick.center.y;
   const distance = Math.sqrt(dx * dx + dy * dy);
   if (distance > maxRadius) {
     dx = (dx / distance) * maxRadius;
     dy = (dy / distance) * maxRadius;
   }
 
+  if (stick === sticks.right) {
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      dy = 0;
+    } else {
+      dx = 0;
+    }
+  }
+
   const knobX = 50 + (dx / maxRadius) * 50;
   const knobY = 50 + (dy / maxRadius) * 50;
-  joystickKnob.style.left = `${knobX}%`;
-  joystickKnob.style.top = `${knobY}%`;
+  stick.knob.style.left = `${knobX}%`;
+  stick.knob.style.top = `${knobY}%`;
 
   let inputX = dx / maxRadius;
   let inputY = dy / maxRadius;
   if (Math.abs(inputX) < CONFIG.deadzone) inputX = 0;
   if (Math.abs(inputY) < CONFIG.deadzone) inputY = 0;
 
-  currentInput.x = inputX;
-  currentInput.y = inputY;
+  stick.input.x = inputX;
+  stick.input.y = inputY;
 }
 
-function resetJoystick() {
-  activeTouch = null;
-  currentInput = { x: 0, y: 0, active: false };
-  if (joystickKnob) {
-    joystickKnob.style.left = "50%";
-    joystickKnob.style.top = "50%";
-    joystickKnob.style.background = CONFIG.knobColor;
+function resetStick(stick) {
+  stick.touch = null;
+  stick.input = { x: 0, y: 0, active: false };
+  if (stick.knob) {
+    stick.knob.style.left = "50%";
+    stick.knob.style.top = "50%";
+    stick.knob.style.background = CONFIG.knobColor;
   }
 }
