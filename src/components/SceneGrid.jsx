@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAction } from "convex/react";
+import { Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 
 const EMPTY_SCENES = [];
@@ -63,12 +64,25 @@ function resolveThumbnailSrc(scene, signedUrls) {
   return signedUrl;
 }
 
-function SceneCard({ scene, linkLabel, meta, signedUrls }) {
+function SceneCard({ scene, linkLabel, meta, signedUrls, onDelete }) {
   const thumbnailSrc = resolveThumbnailSrc(scene, signedUrls);
   const href = `/s/${scene._id}`;
 
   return (
-    <div className="card">
+    <div className="card" style={{ position: "relative" }}>
+      {onDelete && (
+        <button
+          className="card-delete-btn"
+          aria-label={`Delete ${scene.title}`}
+          onClick={() => {
+            if (window.confirm(`Delete "${scene.title}"? This cannot be undone.`)) {
+              onDelete(scene._id);
+            }
+          }}
+        >
+          <Trash2 size={16} />
+        </button>
+      )}
       <Link to={href} className="card-thumb-link" aria-label={`Open ${scene.title}`}>
         <div className="card-thumb">
           {thumbnailSrc ? (
@@ -95,6 +109,7 @@ export default function SceneGrid({
   emptyLabel = "No scenes yet.",
   linkLabel = "Open",
   meta,
+  onDelete,
 }) {
   const safeScenes = scenes ?? EMPTY_SCENES;
   const signedUrls = useSignedThumbnailUrls(safeScenes);
@@ -116,6 +131,7 @@ export default function SceneGrid({
           meta={meta(scene)}
           linkLabel={linkLabel}
           signedUrls={signedUrls}
+          onDelete={onDelete}
         />
       ))}
     </div>

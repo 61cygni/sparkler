@@ -116,6 +116,36 @@ code {
   font-size: 1rem;
 }
 
+.card-delete-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #aab;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.card:hover .card-delete-btn,
+.card-delete-btn:focus-visible {
+  opacity: 1;
+}
+
+.card-delete-btn:hover {
+  background: rgba(220, 50, 50, 0.85);
+  color: #fff;
+}
+
 .terminal-panel {
   margin: 1.5rem 0 2rem;
   background: linear-gradient(180deg, #050705 0%, #020302 100%);

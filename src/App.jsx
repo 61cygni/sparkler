@@ -61,7 +61,7 @@ export default function App() {
             <Link to="/" style={{ fontWeight: 700 }}>
               Sparkler
             </Link>
-            <Link to="/gallery">Gallary</Link>
+            <Link to="/gallery">Public</Link>
             <Link to="/about">About</Link>
             {accountStatus?.isAdmin ? <Link to="/admin/access">Admin</Link> : null}
           </nav>

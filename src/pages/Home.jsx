@@ -1,4 +1,4 @@
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import CliQuickstartPanel from "../components/CliQuickstartPanel.jsx";
 import SceneGrid from "../components/SceneGrid.jsx";
@@ -6,7 +6,16 @@ import SceneGrid from "../components/SceneGrid.jsx";
 export default function Home() {
   const accountStatus = useQuery(api.users.getMyAccountStatus);
   const myScenes = useQuery(api.scenes.listMyScenes, { limit: 50 });
+  const deleteScene = useAction(api.sceneDelete.deleteMyScene);
   const signedOut = accountStatus === null || accountStatus?.isDemo === true;
+
+  const handleDelete = async (sceneId) => {
+    try {
+      await deleteScene({ sceneId });
+    } catch (err) {
+      alert(`Delete failed: ${err.message ?? err}`);
+    }
+  };
 
   return (
     <div className="page">
@@ -41,6 +50,7 @@ export default function Home() {
             emptyLabel="No scenes yet. Use ./bin/sparkler host <file> to add one."
             linkLabel="Open"
             meta={(scene) => `${scene.status} · ${scene.visibility}`}
+            onDelete={handleDelete}
           />
         </>
       ) : null}
