@@ -314,37 +314,56 @@ async function createThumbnailBlob(sourceCanvas) {
 }
 
 const _mobileTurnQuat = new THREE.Quaternion();
+const _mobileTurnAxis = new THREE.Vector3();
+const _mobileForward = new THREE.Vector3();
+const _mobileForwardVertical = new THREE.Vector3();
 
-function applyMobileMovement(localFrame, deltaTime) {
+function captureMobileControlAxis(localFrame, target) {
+  target.copy(XR_WORLD_Y_AXIS).applyQuaternion(localFrame.quaternion);
+  if (target.lengthSq() < 1e-8) {
+    target.copy(XR_WORLD_Y_AXIS);
+  } else {
+    target.normalize();
+  }
+}
+
+function applyMobileMovement(localFrame, deltaTime, turnAxis = XR_WORLD_Y_AXIS) {
   const mobile = getMobileInput();
   const mobileRight = getMobileInputRight();
   if (!mobile.active && !mobileRight.active) {
     return;
   }
+  _mobileTurnAxis.copy(turnAxis);
+  if (_mobileTurnAxis.lengthSq() < 1e-8) {
+    _mobileTurnAxis.copy(XR_WORLD_Y_AXIS);
+  } else {
+    _mobileTurnAxis.normalize();
+  }
   const velocity = new THREE.Vector3();
 
   if (mobile.active) {
-    const forward = new THREE.Vector3(0, 0, -1);
-    const right = new THREE.Vector3(1, 0, 0);
-    forward.applyQuaternion(localFrame.quaternion);
-    right.applyQuaternion(localFrame.quaternion);
-    forward.y = 0;
-    right.y = 0;
-    if (forward.lengthSq() > 0) forward.normalize();
-    if (right.lengthSq() > 0) right.normalize();
-    velocity.addScaledVector(right, mobile.x);
-    velocity.addScaledVector(forward, -mobile.y);
-  }
-
-  if (mobileRight.active) {
-    velocity.y += mobileRight.y;
-
-    if (Math.abs(mobileRight.x) > 0) {
-      const yawAmount = mobileRight.x * MOBILE_TURN_SPEED * deltaTime;
-      _mobileTurnQuat.setFromAxisAngle(XR_WORLD_Y_AXIS, yawAmount);
+    if (Math.abs(mobile.x) > 0) {
+      const yawAmount = -mobile.x * MOBILE_TURN_SPEED * deltaTime;
+      _mobileTurnQuat.setFromAxisAngle(_mobileTurnAxis, yawAmount);
       localFrame.quaternion.premultiply(_mobileTurnQuat);
       localFrame.quaternion.normalize();
     }
+
+    if (Math.abs(mobile.y) > 0) {
+      _mobileForward.set(0, 0, -1).applyQuaternion(localFrame.quaternion);
+      _mobileForwardVertical.copy(_mobileTurnAxis).multiplyScalar(
+        _mobileForward.dot(_mobileTurnAxis),
+      );
+      _mobileForward.sub(_mobileForwardVertical);
+      if (_mobileForward.lengthSq() > 0) {
+        _mobileForward.normalize();
+        velocity.addScaledVector(_mobileForward, -mobile.y);
+      }
+    }
+  }
+
+  if (mobileRight.active && Math.abs(mobileRight.y) > 0) {
+    velocity.addScaledVector(_mobileTurnAxis, -mobileRight.y * 0.5);
   }
 
   if (velocity.lengthSq() > 0) {
@@ -537,6 +556,7 @@ export default function SplatViewer({
   const stopAudioRef = useRef(() => {});
   const xrRef = useRef(null);
   const xrTurnAxisRef = useRef(XR_WORLD_Y_AXIS.clone());
+  const mobileTurnAxisRef = useRef(XR_WORLD_Y_AXIS.clone());
   const presignView = useAction(api.tigris.presignView);
   const resolveSceneAudio = useAction(api.tigris.resolveSceneAudio);
   const presignThumbnailUpload = useAction(api.tigris.presignThumbnailUpload);
@@ -581,6 +601,7 @@ export default function SplatViewer({
     setXrSupported(false);
     setXrPresenting(false);
     xrTurnAxisRef.current.copy(XR_WORLD_Y_AXIS);
+    mobileTurnAxisRef.current.copy(XR_WORLD_Y_AXIS);
   }, [sceneId, viewerMode]);
 
   useEffect(() => {
@@ -984,12 +1005,14 @@ export default function SplatViewer({
             sceneId,
           });
         }
+        captureMobileControlAxis(localFrame, mobileTurnAxisRef.current);
         resetPoseRef.current = getExactViewPose(localFrame);
         resetViewRef.current = () => {
           if (!resetPoseRef.current) {
             return;
           }
           applyPose(localFrame, camera, resetPoseRef.current);
+          captureMobileControlAxis(localFrame, mobileTurnAxisRef.current);
           latestViewRef.current = getViewPose(localFrame);
           latestExactViewRef.current = getExactViewPose(localFrame);
           setCurrentView(latestViewRef.current);
@@ -1161,7 +1184,7 @@ export default function SplatViewer({
           });
         }
         if (mobileControlsAvailable && movementState.value) {
-          applyMobileMovement(localFrame, deltaTime);
+          applyMobileMovement(localFrame, deltaTime, mobileTurnAxisRef.current);
         }
         if (showControlChrome) {
           latestViewRef.current = getViewPose(localFrame);

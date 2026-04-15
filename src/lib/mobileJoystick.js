@@ -243,11 +243,7 @@ function updateStickPosition(stick, touchX, touchY) {
   }
 
   if (stick === sticks.right) {
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      dy = 0;
-    } else {
-      dx = 0;
-    }
+    dx = 0;
   }
 
   const knobX = 50 + (dx / maxRadius) * 50;
